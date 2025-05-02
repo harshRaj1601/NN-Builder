@@ -5,541 +5,138 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Neural Network Builder</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+    
     <!-- Bootstrap CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    
     <!-- Font Awesome CSS -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Highlight.js for code highlighting -->
+    <link href="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/styles/atom-one-dark.min.css" rel="stylesheet">
+    
+    <!-- Custom Dark Theme CSS -->
+    <link href="/static/css/dark-theme.css" rel="stylesheet">
+    
+    <!-- D3.js -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Highlight.js with Python language support -->
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/core.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.7.0/lib/highlight.min.js"></script>
+    <script>
+        // Register Python with highlight.js
+        hljs.registerLanguage('python', function() {
+            return {
+                name: 'Python',
+                aliases: ['py', 'gyp', 'ipython'],
+                keywords: {
+                    keyword: 'and elif is global as in if from raise for except finally print import pass return exec else break not with class assert yield try while continue del or def lambda async await nonlocal',
+                    built_in: 'None True False self',
+                    literal: 'Ellipsis NotImplemented'
+                },
+                contains: [
+                    {className: 'meta', begin: /^(>>>|\.\.\.) /},
+                    {className: 'number', begin: /\b[0-9]+[ejEJ]\b/}, 
+                    {className: 'string', contains: [{begin: /\\/}], variants: [
+                        {begin: /r\'\'\'/, end: /\'\'\'/},
+                        {begin: /r"""/, end: /"""/},
+                        {begin: /r'/, end: /'/},
+                        {begin: /r"/, end: /"/},
+                        {begin: /'''/, end: /'''/},
+                        {begin: /"""/, end: /"""/},
+                        {begin: /'/, end: /'/},
+                        {begin: /"/, end: /"/}
+                    ]},
+                    {className: 'comment', begin: /#/, end: /$/},
+                    {className: 'function', beginKeywords: 'def', end: /:/},
+                    {className: 'class', beginKeywords: 'class', end: /:/},
+                    {begin: /\b(self|cls)\b/}
+                ]
+            };
+        });
+    </script>
+    
     <!-- Axios -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/0.21.1/axios.min.js"></script>
-    <!-- Custom CSS -->
-    <style>
-        /* CSS Variables */
-        :root {
-            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            --secondary-gradient: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-            --accent-gradient: linear-gradient(135deg, #FF9966 0%, #FF5E62 100%);
-            --body-bg: #f8f9fa;
-            --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            --card-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-            --border-radius: 15px;
-            --transition-speed: 0.3s;
-        }
-
-        /* General Styles */
-        body {
-            background-color: var(--body-bg);
-            font-family: var(--font-family);
-            color: #333;
-            background-image: linear-gradient(to right top, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
-            min-height: 100vh;
-        }
-
-        .container {
-            max-width: 960px;
-        }
-
-        /* Cards */
-        .card {
-            border: none;
-            border-radius: var(--border-radius);
-            box-shadow: var(--card-shadow);
-            transition: transform var(--transition-speed), box-shadow var(--transition-speed);
-            margin-bottom: 30px;
-            overflow: hidden;
-        }
-
-        .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
-        }
-
-        .card-header {
-            background: var(--primary-gradient);
-            color: white;
-            border-radius: var(--border-radius) var(--border-radius) 0 0 !important;
-            padding: 20px;
-            font-weight: 600;
-            letter-spacing: 0.5px;
-        }
-
-        .card-title {
-            margin-bottom: 0;
-            display: flex;
-            align-items: center;
-        }
-
-        .card-body {
-            padding: 25px;
-        }
-
-        /* Buttons */
-        .btn {
-            border-radius: 8px;
-            padding: 10px 20px;
-            font-weight: 500;
-            border: none;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-            transition: all 0.3s ease;
-        }
-
-        .btn-lg {
-            padding: 12px 30px;
-        }
-
-        .btn-primary {
-            background: var(--primary-gradient);
-            border: none;
-        }
-
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #5a6fd6 0%, #6a429c 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-        }
-
-        .btn-success {
-            background: var(--secondary-gradient);
-            border: none;
-        }
-
-        .btn-success:hover {
-            background: linear-gradient(135deg, #0f877c 0%, #30d46e 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
-        }
-
-        .btn-outline-primary {
-            border: 1px solid #667eea;
-            color: #667eea;
-        }
-
-        .btn-outline-primary:hover {
-            background: rgba(102, 126, 234, 0.1);
-            color: #556ad0;
-            border-color: #556ad0;
-        }
-
-        /* Loading Overlay */
-        .loading-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(255, 255, 255, 0.9);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            backdrop-filter: blur(5px);
-        }
-
-        .loading-container {
-            text-align: center;
-        }
-
-        .loading-spinner {
-            width: 60px;
-            height: 60px;
-            border: 6px solid rgba(102, 126, 234, 0.2);
-            border-top: 6px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 15px;
-        }
-
-        .loading-text {
-            color: #667eea;
-            font-weight: 600;
-            font-size: 18px;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
-            }
-
-            100% {
-                transform: rotate(360deg);
-            }
-        }
-
-        /* Custom File Upload */
-        .custom-file-upload {
-            border: 2px dashed #dee2e6;
-            border-radius: 10px;
-            padding: 35px;
-            text-align: center;
-            cursor: pointer;
-            transition: all var(--transition-speed);
-            color: #6c757d;
-            background: white;
-        }
-
-        .custom-file-upload:hover {
-            border-color: #667eea;
-            background: rgba(102, 126, 234, 0.05);
-            color: #495057;
-        }
-
-        .custom-file-upload i {
-            font-size: 50px;
-            color: #667eea;
-            margin-bottom: 15px;
-        }
-
-        /* Step Indicator */
-        .step-indicator {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 40px;
-            padding: 0 20px;
-        }
-
-        .step {
-            flex: 1;
-            text-align: center;
-            position: relative;
-            opacity: 0.5;
-            transition: opacity 0.3s ease;
-        }
-
-        .step.active {
-            opacity: 1;
-        }
-
-        .step.completed {
-            opacity: 1;
-        }
-
-        .step::after {
-            content: '';
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            width: 100%;
-            height: 3px;
-            background: #e9ecef;
-            z-index: 1;
-            transition: background 0.3s ease;
-        }
-
-        .step.active::after {
-            background: linear-gradient(to right, #667eea, #e9ecef);
-        }
-
-        .step.completed::after {
-            background: #667eea;
-        }
-
-        .step:last-child::after {
-            display: none;
-        }
-
-        .step-icon {
-            width: 45px;
-            height: 45px;
-            background: #e9ecef;
-            border-radius: 50%;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            color: #6c757d;
-            position: relative;
-            z-index: 2;
-            margin-bottom: 12px;
-            transition: all 0.3s ease;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        }
-
-        .step.active .step-icon {
-            background: var(--primary-gradient);
-            color: white;
-            box-shadow: 0 4px 10px rgba(102, 126, 234, 0.3);
-            transform: scale(1.1);
-        }
-
-        .step.completed .step-icon {
-            background: var(--secondary-gradient);
-            color: white;
-        }
-
-        .step-title {
-            font-weight: 600;
-            margin-bottom: 5px;
-            transition: all 0.3s ease;
-        }
-
-        .step.active .step-title {
-            color: #667eea;
-        }
-
-        .step.completed .step-title {
-            color: #11998e;
-        }
-
-        /* Stats Box */
-        .stats-box {
-            background: white;
-            border-radius: 10px;
-            padding: 15px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .stats-value {
-            font-size: 24px;
-            font-weight: 600;
-            color: #667eea;
-            margin-top: 5px;
-        }
-
-        /* Layer Configuration */
-        .layer-item {
-            background: white;
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 15px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-            position: relative;
-        }
-
-        .layer-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .layer-title {
-            font-weight: 600;
-            display: flex;
-            align-items: center;
-        }
-
-        .layer-icon {
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            background: rgba(102, 126, 234, 0.1);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-right: 10px;
-            color: #667eea;
-        }
-
-        .layer-remove {
-            color: #dc3545;
-            cursor: pointer;
-            font-size: 18px;
-            opacity: 0.7;
-            transition: opacity 0.3s ease;
-        }
-
-        .layer-remove:hover {
-            opacity: 1;
-        }
-
-        /* Training Progress */
-        .training-progress {
-            display: none;
-            margin-top: 30px;
-        }
-
-        .progress {
-            height: 15px;
-            border-radius: 10px;
-            margin-top: 15px;
-            background-color: #e9ecef;
-            overflow: hidden;
-        }
-
-        .progress-bar {
-            background: var(--primary-gradient);
-        }
-
-        /* Training Results */
-        .training-plot {
-            border-radius: 10px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
-            margin-top: 20px;
-            width: 100%;
-        }
-
-        /* Model Summary */
-        .model-summary {
-            background: #f8f9fa;
-            border-radius: 10px;
-            padding: 15px;
-            font-family: monospace;
-            white-space: pre-wrap;
-            max-height: 300px;
-            overflow-y: auto;
-            margin-bottom: 20px;
-        }
-
-        /* Form Controls */
-        .form-control, .form-select {
-            border-radius: 8px;
-            padding: 10px 15px;
-            border: 1px solid #dee2e6;
-            transition: all 0.3s ease;
-        }
-
-        .form-control:focus, .form-select:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.2);
-        }
-
-        .form-label {
-            font-weight: 500;
-            margin-bottom: 8px;
-            color: #495057;
-        }
-
-        /* Dropzone active state */
-        .file-active {
-            border-color: #667eea;
-            background: rgba(102, 126, 234, 0.05);
-        }
-
-        /* Responsive adjustments */
-        @media (max-width: 768px) {
-            .step-indicator {
-                flex-direction: column;
-                align-items: center;
-            }
-
-            .step {
-                margin-bottom: 20px;
-                width: 100%;
-            }
-
-            .step::after {
-                display: none;
-            }
-
-            .card-body {
-                padding: 20px 15px;
-            }
-        }
-
-        /* Section visibility control */
-        #architectureSection, #modelSummarySection, #trainingResultsSection {
-            display: none;
-        }
-        
-        /* File name display */
-        .file-name {
-            margin-top: 10px;
-            font-weight: 500;
-            color: #667eea;
-        }
-        
-        /* Architecture visualization */
-        .architecture-visualization {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            margin: 20px 0;
-            position: relative;
-        }
-        
-        .arch-layer {
-            background: var(--primary-gradient);
-            color: white;
-            border-radius: 10px;
-            padding: 10px 15px;
-            margin: 5px 0;
-            min-width: 180px;
-            text-align: center;
-            position: relative;
-            z-index: 2;
-        }
-        
-        .arch-layer.input {
-            background: var(--accent-gradient);
-        }
-        
-        .arch-layer.output {
-            background: var(--secondary-gradient);
-        }
-        
-        .arch-connection {
-            height: 20px;
-            width: 3px;
-            background: #667eea;
-            margin: 0 auto;
-        }
-    </style>
 </head>
 
 <body>
-    <div class="container py-5">
-        <!-- Loading Overlay -->
-        <div id="loadingOverlay" class="loading-overlay">
-            <div class="loading-container">
-                <div class="loading-spinner"></div>
-                <div class="loading-text" id="loadingText">Processing...</div>
-            </div>
-        </div>
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div id="loadingText" class="loading-text">Processing...</div>
+    </div>
 
-        <!-- Header -->
-        <div class="text-center mb-5">
-            <h1 class="display-4 fw-bold">Neural Network Builder</h1>
-            <p class="lead text-muted">Build, train, and download your custom neural network model with ease</p>
+    <!-- Header -->
+    <header class="page-header">
+        <div class="title-animation">
+            <h1>Neural Network Builder</h1>
+            <p>Build, train, and visualize your neural network models with an intuitive interface</p>
         </div>
+    </header>
 
+    <div class="container">
         <!-- Step Indicator -->
-        <div class="step-indicator mb-5">
+        <div class="step-indicator">
             <div class="step active" id="step1">
                 <div class="step-icon">
                     <i class="fas fa-upload"></i>
                 </div>
-                <div class="step-title">Upload Dataset</div>
-                <div class="step-description text-muted small">Select your CSV file</div>
+                <div class="step-title">Dataset</div>
+                <div class="step-description">Upload your data</div>
             </div>
             <div class="step" id="step2">
                 <div class="step-icon">
                     <i class="fas fa-project-diagram"></i>
                 </div>
-                <div class="step-title">Configure Model</div>
-                <div class="step-description text-muted small">Design your architecture</div>
+                <div class="step-title">Architecture</div>
+                <div class="step-description">Design your network</div>
             </div>
             <div class="step" id="step3">
                 <div class="step-icon">
                     <i class="fas fa-cogs"></i>
                 </div>
-                <div class="step-title">Train Model</div>
-                <div class="step-description text-muted small">Run training process</div>
+                <div class="step-title">Training</div>
+                <div class="step-description">Configure & train</div>
             </div>
             <div class="step" id="step4">
                 <div class="step-icon">
-                    <i class="fas fa-download"></i>
+                    <i class="fas fa-chart-line"></i>
                 </div>
-                <div class="step-title">Download</div>
-                <div class="step-description text-muted small">Get your model package</div>
+                <div class="step-title">Results</div>
+                <div class="step-description">Analyze performance</div>
+            </div>
+            <div class="step" id="step5">
+                <div class="step-icon">
+                    <i class="fas fa-code"></i>
+                </div>
+                <div class="step-title">Code & Deploy</div>
+                <div class="step-description">Export your model</div>
             </div>
         </div>
 
         <!-- Dataset Upload Section -->
-        <div class="card mb-4" id="datasetSection">
+        <div class="card" id="datasetSection">
             <div class="card-header">
-                <h5 class="card-title mb-0"><i class="fas fa-file-csv me-2"></i>Dataset Upload</h5>
+                <h5 class="card-title"><i class="fas fa-file-csv me-2"></i>Dataset Upload</h5>
             </div>
             <div class="card-body">
                 <div class="mb-4">
-                    <label for="datasetFile" class="custom-file-upload" id="fileDropzone">
+                    <label for="datasetFile" id="fileDropzone" class="custom-file-upload">
                         <i class="fas fa-cloud-upload-alt"></i>
                         <div>
                             <p class="mb-0">Click to upload or drag and drop</p>
                             <small class="text-muted">CSV files only</small>
                         </div>
-                        <div class="file-name" id="fileName"></div>
-                        <input type="file" class="d-none" id="datasetFile" accept=".csv"
-                            onchange="handleFileUpload(event)">
+                        <div id="fileName" class="file-name"></div>
+                        <input type="file" class="d-none" id="datasetFile" accept=".csv">
                     </label>
                 </div>
 
@@ -550,7 +147,7 @@
                             <option value="">Select target variable</option>
                         </select>
                     </div>
-                    <button class="btn btn-primary btn-lg w-100" id="analyzeBtn" onclick="analyzeDataset()">
+                    <button class="btn btn-primary btn-lg w-100" id="analyzeBtn">
                         <i class="fas fa-chart-line me-2"></i>Analyze Dataset
                     </button>
                 </div>
@@ -558,532 +155,220 @@
         </div>
 
         <!-- Model Architecture Section -->
-        <div class="card mb-4" id="architectureSection">
+        <div class="card" id="architectureSection" style="display: none;">
             <div class="card-header">
-                <h5 class="card-title mb-0"><i class="fas fa-network-wired me-2"></i>Neural Network Architecture</h5>
+                <h5 class="card-title"><i class="fas fa-network-wired me-2"></i>Neural Network Architecture</h5>
             </div>
             <div class="card-body">
                 <div class="row mb-4">
                     <div class="col-md-4">
-                        <div class="stats-box">
-                            <div class="text-muted">Samples</div>
-                            <div class="stats-value" id="statSamples">-</div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="statSamples">-</div>
+                            <div class="metric-label">Samples</div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="stats-box">
-                            <div class="text-muted">Features</div>
-                            <div class="stats-value" id="statFeatures">-</div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="statFeatures">-</div>
+                            <div class="metric-label">Features</div>
                         </div>
                     </div>
                     <div class="col-md-4">
-                        <div class="stats-box">
-                            <div class="text-muted">Task Type</div>
-                            <div class="stats-value" id="statTaskType">-</div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="statTaskType">-</div>
+                            <div class="metric-label">Task Type</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="architecture-visualization" id="archVisualization">
-                    <!-- Architecture visualization will be generated here -->
+                <div class="network-visualization">
+                    <div id="network-vis" class="network-container"></div>
                 </div>
 
-                <div id="layersContainer" class="mb-4">
-                    <!-- Layer configurations will be added here -->
-                </div>
-
-                <h6 class="mb-3"><i class="fas fa-cog me-2"></i>Training Parameters</h6>
-                <div class="row g-3 mb-4">
-                    <div class="col-md-6">
-                        <label class="form-label">Optimizer</label>
-                        <select class="form-select" id="optimizer">
-                            <option value="adam">Adam</option>
-                            <option value="sgd">SGD</option>
-                            <option value="rmsprop">RMSprop</option>
-                            <option value="adagrad">Adagrad</option>
-                        </select>
+                <div class="layer-properties">
+                    <h6 class="mb-3"><i class="fas fa-cog me-2"></i>Training Parameters</h6>
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <label class="form-label">Optimizer</label>
+                            <select class="form-select" id="optimizer">
+                                <option value="adam">Adam</option>
+                                <option value="sgd">SGD</option>
+                                <option value="rmsprop">RMSprop</option>
+                                <option value="adagrad">Adagrad</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Learning Rate</label>
+                            <select class="form-select" id="learningRate">
+                                <option value="0.01">0.01</option>
+                                <option value="0.001" selected>0.001</option>
+                                <option value="0.0001">0.0001</option>
+                            </select>
+                        </div>
                     </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Learning Rate</label>
-                        <select class="form-select" id="learningRate">
-                            <option value="0.01">0.01</option>
-                            <option value="0.001" selected>0.001</option>
-                            <option value="0.0001">0.0001</option>
-                        </select>
-                    </div>
-                </div>
 
-                <div class="d-flex justify-content-between">
-                    <button class="btn btn-outline-primary" id="addLayerBtn" onclick="addCustomLayer()">
-                        <i class="fas fa-plus me-2"></i>Add Layer
-                    </button>
-                    <button class="btn btn-primary" id="buildModelBtn" onclick="buildModel()">
+                    <button class="btn btn-primary btn-lg w-100" id="buildModelBtn">
                         <i class="fas fa-hammer me-2"></i>Build Model
+                    </button>
+                    
+                    <button class="btn btn-secondary btn-lg w-100 mt-3" id="directCodeBtn">
+                        <i class="fas fa-code me-2"></i>Generate Code Without Training
                     </button>
                 </div>
             </div>
         </div>
 
         <!-- Model Summary and Training Section -->
-        <div class="card mb-4" id="modelSummarySection">
+        <div class="card" id="modelSummarySection" style="display: none;">
             <div class="card-header">
-                <h5 class="card-title mb-0"><i class="fas fa-info-circle me-2"></i>Model Summary & Training</h5>
+                <h5 class="card-title"><i class="fas fa-info-circle me-2"></i>Model Summary & Training</h5>
             </div>
             <div class="card-body">
-                <div class="model-summary" id="modelSummary">
-                    <div class="text-center text-muted">Model summary will appear here after building.</div>
+                <div class="code-viewer">
+                    <div class="code-header">
+                        <h6 class="mb-0">Model Summary</h6>
+                    </div>
+                    <pre id="modelSummary" class="code-content">
+                        <code>Model summary will appear here after building.</code>
+                    </pre>
                 </div>
 
                 <div class="mt-4">
                     <h6 class="mb-3"><i class="fas fa-sliders-h me-2"></i>Training Configuration</h6>
                     <div class="row g-3">
-                        <div class="col-md-6">
-                            <label class="form-label">Epochs</label>
-                            <input type="number" class="form-control" id="epochs" value="10" min="1" max="100">
+                        <div class="col-md-4">
+                            <label class="form-label">Epochs <span id="epochsValue">20</span></label>
+                            <div class="range-slider">
+                                <input type="range" class="form-range" id="epochs" min="1" max="100" value="20" oninput="document.getElementById('epochsValue').textContent = this.value">
+                            </div>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Batch Size</label>
-                            <input type="number" class="form-control" id="batchSize" value="32" min="1" max="1024">
+                        <div class="col-md-4">
+                            <label class="form-label">Batch Size <span id="batchSizeValue">32</span></label>
+                            <div class="range-slider">
+                                <input type="range" class="form-range" id="batchSize" min="4" max="128" step="4" value="32" oninput="document.getElementById('batchSizeValue').textContent = this.value">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Train/Test Split <span id="splitValue">80%</span></label>
+                            <div class="range-slider">
+                                <input type="range" class="form-range" id="trainTestSplit" min="50" max="90" step="5" value="80" oninput="document.getElementById('splitValue').textContent = this.value + '%'">
+                            </div>
                         </div>
                     </div>
-                    <button class="btn btn-success btn-lg w-100 mt-4" id="startTrainingBtn" onclick="trainModel()">
-                        <i class="fas fa-play me-2"></i>Start Training
-                    </button>
+                    <div class="d-flex mt-4">
+                        <button class="btn btn-secondary me-2" id="backToArchitectureBtn">
+                            <i class="fas fa-arrow-left me-2"></i>Back to Architecture
+                        </button>
+                        <button class="btn btn-primary flex-grow-1" id="startTrainingBtn">
+                            <i class="fas fa-play me-2"></i>Start Training
+                        </button>
+                    </div>
                 </div>
 
-                <div class="training-progress" id="trainingProgress">
-                    <h6 class="mb-3"><i class="fas fa-spinner fa-spin me-2"></i>Training in Progress...</h6>
-                    <div class="progress">
-                        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar"
-                            style="width: 100%"></div>
+                <div class="training-monitor mt-4">
+                    <div class="training-header">
+                        <div class="training-status">
+                            <i class="fas fa-info-circle"></i>
+                            <span id="training-status-text">Ready to train</span>
+                        </div>
+                    </div>
+                    
+                    <div id="training-metrics" class="training-metrics"></div>
+                    
+                    <div class="training-charts">
+                        <div class="chart-container">
+                            <canvas id="loss-chart"></canvas>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="accuracy-chart"></canvas>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Training Results -->
-        <div class="card mb-4" id="trainingResultsSection">
+        <div class="card" id="trainingResultsSection" style="display: none;">
             <div class="card-header">
-                <h5 class="card-title mb-0"><i class="fas fa-chart-bar me-2"></i>Training Results</h5>
+                <h5 class="card-title"><i class="fas fa-chart-bar me-2"></i>Training Results</h5>
             </div>
             <div class="card-body">
                 <div class="row mb-4">
                     <div class="col-md-6">
-                        <div class="stats-box">
-                            <div class="text-muted">Test Accuracy</div>
-                            <div class="stats-value" id="testAccuracy">-</div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="testAccuracy">-</div>
+                            <div class="metric-label">Test Accuracy</div>
                         </div>
                     </div>
                     <div class="col-md-6">
-                        <div class="stats-box">
-                            <div class="text-muted">Test Loss</div>
-                            <div class="stats-value" id="testLoss">-</div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="testLoss">-</div>
+                            <div class="metric-label">Test Loss</div>
                         </div>
                     </div>
                 </div>
 
-                <img class="training-plot img-fluid" id="trainingPlot" alt="Training Metrics Plot">
+                <div class="btn-group w-100 mb-4">
+                    <button class="btn btn-secondary" id="backToTrainingBtn">
+                        <i class="fas fa-arrow-left me-2"></i>Back to Training
+                    </button>
+                    <button class="btn btn-primary" id="downloadBtn">
+                        <i class="fas fa-download me-2"></i>Download Model
+                    </button>
+                    <button class="btn btn-secondary" id="generateCodeBtn">
+                        <i class="fas fa-code me-2"></i>Generate Code
+                    </button>
+                </div>
 
-                <button class="btn btn-primary btn-lg w-100 mt-4" id="downloadBtn" onclick="downloadModel()">
-                    <i class="fas fa-download me-2"></i>Download Model & Code
-                </button>
+                <div class="prediction-block" id="prediction-container">
+                    <h6 class="mb-3"><i class="fas fa-magic me-2"></i>Make Predictions</h6>
+                    <div id="prediction-inputs" class="prediction-inputs"></div>
+                    <button class="btn btn-primary mt-3" id="run-prediction-btn">
+                        <i class="fas fa-play me-2"></i>Run Prediction
+                    </button>
+                    <div id="prediction-results" class="prediction-results"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Code Section -->
+        <div class="card" id="codeSection" style="display: none;">
+            <div class="card-header">
+                <h5 class="card-title"><i class="fas fa-code me-2"></i>Generated Code</h5>
+            </div>
+            <div class="card-body">
+                <div class="code-viewer">
+                    <div class="code-header">
+                        <h6 class="mb-0">Python Implementation</h6>
+                        <div class="code-actions">
+                            <button class="btn btn-sm btn-outline" id="copyCodeBtn">
+                                <i class="fas fa-copy me-2"></i>Copy Code
+                            </button>
+                        </div>
+                    </div>
+                    <pre class="code-content">
+                        <code id="codeContent" class="language-python"># Code will be generated after training.</code>
+                    </pre>
+                </div>
             </div>
         </div>
     </div>
 
-    <script>
-        // Global variables to store model configuration
-        let currentArchitecture = null;
-        let datasetInfo = null;
-        let lastUploadedFile = null;
+    <!-- Footer -->
+    <footer class="mt-5 mb-3 text-center">
+        <div class="container">
+            <p class="text-muted">© 2025 Neural Network Builder - A powerful tool for building neural networks</p>
+        </div>
+    </footer>
 
-        // DOM elements
-        const fileDropzone = document.getElementById('fileDropzone');
-        const fileName = document.getElementById('fileName');
-
-        // Initialize step states
-        function updateSteps(activeStep) {
-            // Reset all steps
-            document.querySelectorAll('.step').forEach(step => {
-                step.classList.remove('active');
-                step.classList.remove('completed');
-            });
-            
-            // Set active step
-            document.getElementById('step' + activeStep).classList.add('active');
-            
-            // Set previous steps as completed
-            for (let i = 1; i < activeStep; i++) {
-                document.getElementById('step' + i).classList.add('completed');
-            }
-        }
-
-        // Show/hide sections
-        function showSection(sectionId) {
-            // Hide all sections first
-            document.getElementById('datasetSection').style.display = 'none';
-            document.getElementById('architectureSection').style.display = 'none';
-            document.getElementById('modelSummarySection').style.display = 'none';
-            document.getElementById('trainingResultsSection').style.display = 'none';
-            
-            // Show the requested section
-            document.getElementById(sectionId).style.display = 'block';
-        }
-
-        // Function to hide the loading overlay
-        function hideLoadingOverlay() {
-            document.getElementById('loadingOverlay').style.display = 'none';
-        }
-
-        // Function to show the loading overlay with custom text
-        function showLoadingOverlay(text = 'Processing...') {
-            document.getElementById('loadingText').textContent = text;
-            document.getElementById('loadingOverlay').style.display = 'flex';
-        }
-
-        // File upload drag and drop handling
-        fileDropzone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            fileDropzone.classList.add('file-active');
-        });
-
-        fileDropzone.addEventListener('dragleave', () => {
-            fileDropzone.classList.remove('file-active');
-        });
-
-        fileDropzone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            fileDropzone.classList.remove('file-active');
-            
-            if (e.dataTransfer.files.length) {
-                document.getElementById('datasetFile').files = e.dataTransfer.files;
-                handleFileUpload({ target: { files: e.dataTransfer.files } });
-            }
-        });
-
-        // Handle file upload
-        function handleFileUpload(event) {
-            const file = event.target.files[0];
-            if (file) {
-                fileName.textContent = file.name;
-                lastUploadedFile = file;
-
-                showLoadingOverlay('Reading file...');
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const lines = e.target.result.split('\n');
-                    const datasetColumns = lines[0].split(',').map(col => col.trim());
-
-                    // Populate the target column dropdown
-                    const targetColumnSelect = document.getElementById('targetColumn');
-                    targetColumnSelect.innerHTML = '<option value="">Select target variable</option>';
-
-                    datasetColumns.forEach(col => {
-                        if (col) {  // Only add non-empty columns
-                            const option = document.createElement('option');
-                            option.value = col;
-                            option.textContent = col;
-                            targetColumnSelect.appendChild(option);
-                        }
-                    });
-                    
-                    hideLoadingOverlay();
-                };
-                reader.onerror = () => {
-                    alert('There was an error when reading the file.');
-                    hideLoadingOverlay();
-                };
-                reader.readAsText(file);
-            }
-        }
-
-        // Analyze dataset
-        function analyzeDataset() {
-            const file = lastUploadedFile;
-            const targetColumn = document.getElementById('targetColumn').value;
-
-            if (!file) {
-                alert('Please select a CSV file first.');
-                return;
-            }
-
-            if (!targetColumn) {
-                alert('Please select a target column.');
-                return;
-            }
-
-            showLoadingOverlay('Analyzing dataset...');
-            
-            const formData = new FormData();
-            formData.append('file', file);
-            formData.append('target_column', targetColumn);
-
-            axios.post('/upload_dataset', formData)
-                .then(response => {
-                    // Store the suggested architecture and dataset info
-                    currentArchitecture = response.data.architecture;
-                    datasetInfo = response.data.dataset_info;
-                    
-                    // Update dataset stats display
-                    document.getElementById('statSamples').textContent = datasetInfo.n_samples;
-                    document.getElementById('statFeatures').textContent = datasetInfo.n_features;
-                    document.getElementById('statTaskType').textContent = datasetInfo.target_type.charAt(0).toUpperCase() + datasetInfo.target_type.slice(1);
-                    
-                    // Build layers UI from the suggested architecture
-                    buildLayersUI(currentArchitecture.layers);
-                    
-                    // Update visualization
-                    updateArchitectureVisualization(currentArchitecture.layers);
-                    
-                    // Update steps and show architecture section
-                    updateSteps(2);
-                    showSection('architectureSection');
-                })
-                .catch(error => {
-                    let errorMsg = 'Error analyzing dataset';
-                    if (error.response && error.response.data && error.response.data.error) {
-                        errorMsg += ': ' + error.response.data.error;
-                    }
-                    alert(errorMsg);
-                })
-                .finally(() => {
-                    hideLoadingOverlay();
-                });
-        }
-
-        // Build layers UI from the architecture
-        function buildLayersUI(layers) {
-            const layersContainer = document.getElementById('layersContainer');
-            layersContainer.innerHTML = '';
-
-            // Add input layer info first
-            const inputLayerItem = document.createElement('div');
-            inputLayerItem.className = 'layer-item';
-            inputLayerItem.innerHTML = `
-                <div class="layer-header">
-                    <div class="layer-title">
-                        <div class="layer-icon">
-                            <i class="fas fa-database"></i>
-                        </div>
-                        Input Layer
-                    </div>
-                </div>
-                <div class="row">
-                    <div class="col-12">
-                        <small class="text-muted">Features: ${datasetInfo.n_features}</small>
-                    </div>
-                </div>
-            `;
-            layersContainer.appendChild(inputLayerItem);
-
-            // Add hidden layers
-            layers.forEach((layer, index) => {
-                if (index < layers.length - 1) {
-                    // Add hidden layer
-                    const layerItem = document.createElement('div');
-                    layerItem.className = 'layer-item';
-                    layerItem.innerHTML = `
-                        <div class="layer-header">
-                            <div class="layer-title">
-                                <div class="layer-icon">
-                                    <i class="fas fa-cube"></i>
-                                </div>
-                                Hidden Layer ${index + 1}
-                            </div>
-                            <div class="layer-remove" onclick="removeLayer(${index})">
-                                <i class="fas fa-times"></i>
-                            </div>
-                        </div>
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="form-label">Units</label>
-                                <input type="number" class="form-control" value="${layer.units}" 
-                                    onchange="updateLayer(${index}, 'units', this.value)" min="1">
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Activation</label>
-                                <select class="form-select" onchange="updateLayer(${index}, 'activation', this.value)">
-                                    ${['relu', 'tanh', 'sigmoid'].map(act => 
-                                        `<option value="${act}" ${layer.activation === act ? 'selected' : ''}>
-                                            ${act.charAt(0).toUpperCase() + act.slice(1)}
-                                        </option>`
-                                    ).join('')}
-                                </select>
-                            </div>
-                        </div>
-                    `;
-                    layersContainer.appendChild(layerItem);
-                } else {
-                    // Add output layer
-                    const outputLayerItem = document.createElement('div');
-                    outputLayerItem.className = 'layer-item';
-                    outputLayerItem.innerHTML = `
-                        <div class="layer-header">
-                            <div class="layer-title">
-                                <div class="layer-icon">
-                                    <i class="fas fa-flag-checkered"></i>
-                                </div>
-                                Output Layer
-                            </div>
-                        </div>
-                        <div class="row g-3">
-                            <div class="col-md-6">
-                                <label class="form-label">Units</label>
-                                <input type="number" class="form-control" value="${layer.units}" disabled>
-                            </div>
-                            <div class="col-md-6">
-                                <label class="form-label">Activation</label>
-                                <select class="form-select" disabled>
-                                    <option value="${layer.activation}" selected>
-                                        ${layer.activation.charAt(0).toUpperCase() + layer.activation.slice(1)}
-                                    </option>
-                                </select>
-                            </div>
-                        </div>
-                    `;
-                    layersContainer.appendChild(outputLayerItem);
-                }
-            });
-        }
-
-        // Update layer configuration
-        function updateLayer(index, property, value) {
-            if (property === 'units') {
-                value = parseInt(value);
-                if (isNaN(value) || value < 1) return;
-            }
-            currentArchitecture.layers[index][property] = value;
-            updateArchitectureVisualization(currentArchitecture.layers);
-        }
-
-        // Remove layer
-        function removeLayer(index) {
-            currentArchitecture.layers.splice(index, 1);
-            buildLayersUI(currentArchitecture.layers);
-            updateArchitectureVisualization(currentArchitecture.layers);
-        }
-
-        // Add custom layer
-        function addCustomLayer() {
-            const newLayer = {
-                units: 64,
-                activation: 'relu'
-            };
-            currentArchitecture.layers.splice(currentArchitecture.layers.length - 1, 0, newLayer);
-            buildLayersUI(currentArchitecture.layers);
-            updateArchitectureVisualization(currentArchitecture.layers);
-        }
-
-        // Update architecture visualization
-        function updateArchitectureVisualization(layers) {
-            const container = document.getElementById('archVisualization');
-            container.innerHTML = '';
-
-            // Add input layer visualization
-            const inputLayer = document.createElement('div');
-            inputLayer.className = 'arch-layer input';
-            inputLayer.textContent = `Input (${datasetInfo.n_features})`;
-            container.appendChild(inputLayer);
-
-            // Add connection
-            container.appendChild(document.createElement('div')).className = 'arch-connection';
-
-            // Add hidden layers
-            layers.forEach((layer, index) => {
-                if (index < layers.length - 1) {
-                    const layerDiv = document.createElement('div');
-                    layerDiv.className = 'arch-layer';
-                    layerDiv.textContent = `Hidden ${index + 1} (${layer.units})`;
-                    container.appendChild(layerDiv);
-                    container.appendChild(document.createElement('div')).className = 'arch-connection';
-                } else {
-                    const outputLayer = document.createElement('div');
-                    outputLayer.className = 'arch-layer output';
-                    outputLayer.textContent = `Output (${layer.units})`;
-                    container.appendChild(outputLayer);
-                }
-            });
-        }
-
-        // Build model
-        function buildModel() {
-            showLoadingOverlay('Building model...');
-
-            axios.post('/build_model', {
-                architecture: currentArchitecture,
-                optimizer: document.getElementById('optimizer').value,
-                learning_rate: parseFloat(document.getElementById('learningRate').value)
-            })
-            .then(response => {
-                document.getElementById('modelSummary').textContent = response.data.model_summary;
-                updateSteps(3);
-                showSection('modelSummarySection');
-            })
-            .catch(error => {
-                alert('Error building model: ' + (error.response?.data?.error || error.message));
-            })
-            .finally(() => {
-                hideLoadingOverlay();
-            });
-        }
-
-        // Train model
-        function trainModel() {
-            showLoadingOverlay('Training model...');
-            document.getElementById('trainingProgress').style.display = 'block';
-            document.getElementById('startTrainingBtn').disabled = true;
-
-            axios.post('/train_model', {
-                epochs: parseInt(document.getElementById('epochs').value),
-                batch_size: parseInt(document.getElementById('batchSize').value)
-            })
-            .then(response => {
-                // Update results
-                document.getElementById('testAccuracy').textContent = 
-                    (response.data.test_accuracy * 100).toFixed(2) + '%';
-                document.getElementById('testLoss').textContent = 
-                    response.data.test_loss.toFixed(4);
-                
-                // Update training plot
-                document.getElementById('trainingPlot').src = 
-                    'data:image/png;base64,' + response.data.training_plot;
-                
-                updateSteps(4);
-                showSection('trainingResultsSection');
-            })
-            .catch(error => {
-                alert('Error training model: ' + (error.response?.data?.error || error.message));
-            })
-            .finally(() => {
-                hideLoadingOverlay();
-                document.getElementById('trainingProgress').style.display = 'none';
-                document.getElementById('startTrainingBtn').disabled = false;
-            });
-        }
-
-        // Download model
-        function downloadModel() {
-            showLoadingOverlay('Preparing download...');
-            
-            axios.get('/download_model', {
-                responseType: 'blob'
-            })
-            .then(response => {
-                const url = window.URL.createObjectURL(new Blob([response.data]));
-                const link = document.createElement('a');
-                link.href = url;
-                link.setAttribute('download', 'neural_network_model.zip');
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-            })
-            .catch(error => {
-                alert('Error downloading model: ' + error.message);
-            })
-            .finally(() => {
-                hideLoadingOverlay();
-            });
-        }
-    </script>
+    <!-- JavaScript Libraries -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom JavaScript -->
+    <script src="/static/js/ui-effects.js"></script>
+    <script src="/static/js/network-visualization.js"></script>
+    <script src="/static/js/training-monitor.js"></script>
+    <script src="/static/js/prediction.js"></script>
+    <script src="/static/js/app.js"></script>
 </body>
 </html>

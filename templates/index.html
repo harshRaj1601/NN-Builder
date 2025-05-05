@@ -147,6 +147,21 @@
                             <option value="">Select target variable</option>
                         </select>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Dataset Type</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="datasetType" id="typeClassification" value="classification" checked>
+                            <label class="form-check-label" for="typeClassification">
+                                Classification
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="datasetType" id="typeRegression" value="regression">
+                            <label class="form-check-label" for="typeRegression">
+                                Regression
+                            </label>
+                        </div>
+                    </div>
                     <button class="btn btn-primary btn-lg w-100" id="analyzeBtn">
                         <i class="fas fa-chart-line me-2"></i>Analyze Dataset
                     </button>
@@ -337,6 +352,15 @@
                 <h5 class="card-title"><i class="fas fa-code me-2"></i>Generated Code</h5>
             </div>
             <div class="card-body">
+                <div class="btn-group w-100 mb-4">
+                    <button class="btn btn-secondary me-2" id="backToResultsBtn">
+                        <i class="fas fa-arrow-left me-2"></i>Back to Results
+                    </button>
+                    <button class="btn btn-secondary" id="backToArchitectureBtn">
+                        <i class="fas fa-project-diagram me-2"></i>Back to Architecture
+                    </button>
+                </div>
+
                 <div class="code-viewer">
                     <div class="code-header">
                         <h6 class="mb-0">Python Implementation</h6>

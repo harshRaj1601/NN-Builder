@@ -31,6 +31,7 @@ class TrainingMonitor {
         this.valAccuracy = [];
         this.testLoss = null;
         this.testAccuracy = null;
+        this.isRegression = false; // Flag to track if we're dealing with regression data
         
         // Training status
         this.isTraining = false;
@@ -221,6 +222,8 @@ class TrainingMonitor {
         this.valAccuracy = [];
         this.testLoss = null;
         this.testAccuracy = null;
+        this.testMaeRaw = null;
+        this.isRegression = false; // Reset regression flag
         this.currentEpoch = 0;
         
         // Clear charts
@@ -315,9 +318,21 @@ class TrainingMonitor {
         this.trainAccuracy.push(parseFloat(data.acc));
         this.valAccuracy.push(parseFloat(data.val_acc));
         
-        console.log("Current accuracy arrays:", {
+        // Check if this is a regression task based on metrics
+        // In regression tasks, the backend sends MAE as 'acc' and 'val_acc'
+        // We can detect this by checking if the backend explicitly tells us
+        // or by checking if the model has 'mae' in its metrics
+        const isRegression = data.is_regression === true;
+        
+        // Store the regression flag for other methods to use
+        if (isRegression !== undefined) {
+            this.isRegression = isRegression;
+        }
+        
+        console.log("Current metrics:", {
             trainAccuracy: this.trainAccuracy,
-            valAccuracy: this.valAccuracy
+            valAccuracy: this.valAccuracy,
+            isRegression: this.isRegression
         });
         
         // Update charts
@@ -330,7 +345,8 @@ class TrainingMonitor {
             trainLoss: data.loss,
             valLoss: data.val_loss,
             trainAccuracy: data.acc,
-            valAccuracy: data.val_acc
+            valAccuracy: data.val_acc,
+            isRegression: this.isRegression
         });
         
         // Call callback if provided
@@ -345,6 +361,17 @@ class TrainingMonitor {
         this.isTraining = false;
         this.testLoss = data.test_loss;
         this.testAccuracy = data.test_accuracy;
+        
+        // Explicitly set the regression flag based on backend data
+        this.isRegression = data.is_regression === true;
+        this.testMaeRaw = data.test_mae_raw; // Store raw MAE for regression tasks
+        
+        console.log("Training completed with data:", {
+            isRegression: this.isRegression,
+            testLoss: this.testLoss,
+            testAccuracy: this.testAccuracy,
+            testMaeRaw: this.testMaeRaw
+        });
         
         // Close event source
         if (this.eventSource) {
@@ -364,8 +391,13 @@ class TrainingMonitor {
             trainAccuracy: this.trainAccuracy[this.trainAccuracy.length - 1],
             valAccuracy: this.valAccuracy[this.valAccuracy.length - 1],
             testLoss: this.testLoss,
-            testAccuracy: this.testAccuracy
+            testAccuracy: this.testAccuracy,
+            testMaeRaw: this.testMaeRaw, // Pass raw MAE to metrics display
+            isRegression: this.isRegression
         });
+        
+        // Always update charts to ensure proper display
+        this.updateCharts();
     }
     
     handleTrainingError(data) {
@@ -390,8 +422,43 @@ class TrainingMonitor {
             this.lossChart.update();
         }
         
-        // Update accuracy chart
+        // Update accuracy chart - use appropriate title for regression vs classification
         if (this.accuracyChart) {
+            // Explicitly check if this is a regression problem
+            // First check the explicit flag, which is set when training completes
+            const isRegression = this.isRegression === true;
+            
+            // Update chart type and labels based on task type
+            if (isRegression) {
+                // For regression tasks, we need to adjust the chart settings
+                this.accuracyChart.options.scales.y.title.text = 'Error Metrics';
+                this.accuracyChart.data.datasets[0].label = 'Training MAE';
+                this.accuracyChart.data.datasets[1].label = 'Validation MAE';
+                
+                // Remove the percentage formatting and fixed max for regression metrics
+                this.accuracyChart.options.scales.y.ticks.callback = function(value) {
+                    return value.toFixed(4);
+                };
+                
+                // Remove the fixed max value for regression error metrics
+                if (this.accuracyChart.options.scales.y.max !== undefined) {
+                    delete this.accuracyChart.options.scales.y.max;
+                }
+            } else {
+                // For classification, use standard accuracy settings
+                this.accuracyChart.options.scales.y.title.text = 'Accuracy';  
+                this.accuracyChart.data.datasets[0].label = 'Training Accuracy';
+                this.accuracyChart.data.datasets[1].label = 'Validation Accuracy';
+                
+                // Restore percentage formatting for classification
+                this.accuracyChart.options.scales.y.ticks.callback = function(value) {
+                    return (value * 100).toFixed(0) + '%';
+                };
+                
+                // Restore max value for classification accuracy
+                this.accuracyChart.options.scales.y.max = 1;
+            }
+            
             this.accuracyChart.data.labels = this.epochs;
             this.accuracyChart.data.datasets[0].data = this.trainAccuracy;
             this.accuracyChart.data.datasets[1].data = this.valAccuracy;
@@ -409,11 +476,20 @@ class TrainingMonitor {
         const trainLoss = parseFloat(metrics.trainLoss) || 0;
         const valLoss = parseFloat(metrics.valLoss) || 0;
         
+        // Determine if we're dealing with a regression task
+        // Only use the explicit flag from the backend
+        const isRegression = metrics.isRegression === true;
+        
+        // Store the regression flag for other methods to use
+        this.isRegression = isRegression;
+        
         console.log("Formatting metrics for display:", {
-            trainAcc, valAcc, trainLoss, valLoss
+            trainAcc, valAcc, trainLoss, valLoss, 
+            isRegression: isRegression,
+            testMaeRaw: metrics.testMaeRaw
         });
         
-        // Create metrics HTML
+        // Create metrics HTML - common metrics first
         let html = `
             <div class="metric-card">
                 <div class="metric-value">${metrics.currentEpoch} / ${metrics.totalEpochs}</div>
@@ -426,7 +502,25 @@ class TrainingMonitor {
             <div class="metric-card">
                 <div class="metric-value">${valLoss.toFixed(4)}</div>
                 <div class="metric-label">Validation Loss</div>
+            </div>`;
+            
+        // Add task-specific metrics
+        if (isRegression) {
+            // For regression, we show error metrics (MAE)
+            html += `
+            <div class="metric-card">
+                <div class="metric-value">${trainAcc.toFixed(4)}</div>
+                <div class="metric-label">Training MAE</div>
+                <div class="metric-description">Lower values indicate better predictions</div>
             </div>
+            <div class="metric-card">
+                <div class="metric-value">${valAcc.toFixed(4)}</div>
+                <div class="metric-label">Validation MAE</div>
+                <div class="metric-description">Lower values indicate better predictions</div>
+            </div>`;
+        } else {
+            // For classification, we show accuracy percentages
+            html += `
             <div class="metric-card">
                 <div class="metric-value">${(trainAcc * 100).toFixed(2)}%</div>
                 <div class="metric-label">Training Accuracy</div>
@@ -435,13 +529,42 @@ class TrainingMonitor {
                 <div class="metric-value">${(valAcc * 100).toFixed(2)}%</div>
                 <div class="metric-label">Validation Accuracy</div>
             </div>`;
+        }
             
         // Add test metrics if available
         if (metrics.testLoss !== undefined && metrics.testAccuracy !== undefined) {
             const testLoss = parseFloat(metrics.testLoss) || 0;
             const testAcc = parseFloat(metrics.testAccuracy) || 0;
             
-            html += `
+            if (isRegression) {
+                // For regression, show the transformed accuracy as a quality score
+                html += `
+                <div class="metric-card">
+                    <div class="metric-value">${(testAcc * 100).toFixed(2)}%</div>
+                    <div class="metric-label">Model Quality</div>
+                    <div class="metric-description">Higher values indicate better model performance</div>
+                </div>`;
+                
+                // If raw MAE is available, show it as well
+                if (metrics.testMaeRaw !== undefined) {
+                    const rawMae = parseFloat(metrics.testMaeRaw) || 0;
+                    html += `
+                    <div class="metric-card">
+                        <div class="metric-value">${rawMae.toFixed(4)}</div>
+                        <div class="metric-label">Mean Absolute Error</div>
+                        <div class="metric-description">Lower values indicate better predictions</div>
+                    </div>`;
+                }
+                
+                // Also show test loss
+                html += `
+                <div class="metric-card">
+                    <div class="metric-value">${testLoss.toFixed(4)}</div>
+                    <div class="metric-label">Test Loss (MSE)</div>
+                </div>`;
+            } else {
+                // For classification, show standard metrics
+                html += `
                 <div class="metric-card">
                     <div class="metric-value">${testLoss.toFixed(4)}</div>
                     <div class="metric-label">Test Loss</div>
@@ -450,6 +573,7 @@ class TrainingMonitor {
                     <div class="metric-value">${(testAcc * 100).toFixed(2)}%</div>
                     <div class="metric-label">Test Accuracy</div>
                 </div>`;
+            }
         }
         
         metricsContainer.innerHTML = html;
@@ -510,6 +634,8 @@ class TrainingMonitor {
         this.valAccuracy = [];
         this.testLoss = null;
         this.testAccuracy = null;
+        this.testMaeRaw = null;
+        this.isRegression = false; // Reset regression flag
         this.currentEpoch = 0;
         
         // Reset training status
@@ -549,7 +675,9 @@ class TrainingMonitor {
 let trainingMonitor;
 
 // Initialize training monitor
-function initTrainingMonitor(config = {}) {
+// Make the function globally available
+window.initTrainingMonitor = function(config = {}) {
+    // Use the global trainingMonitor variable instead of creating a local one
     trainingMonitor = new TrainingMonitor(config);
     return trainingMonitor;
-} 
+}

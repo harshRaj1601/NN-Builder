@@ -40,6 +40,7 @@ scaler = StandardScaler()
 label_encoder = LabelEncoder()
 training_config = None
 training_in_progress = False  # Track if training is already running
+stop_training_flag = False  # Track if user wants to stop training
 
 @app.route('/')
 def index():
@@ -55,6 +56,9 @@ def upload_dataset():
 
     file = request.files['file']
     target_column = request.form.get('target_column')
+    dataset_type = request.form.get('dataset_type', 'classification')  # Get user-selected dataset type
+    
+    logger.debug(f"Dataset type selected by user: {dataset_type}")
 
     try:
         # Read dataset
@@ -72,12 +76,18 @@ def upload_dataset():
             logger.error(f"Target column not found: {target_column}")
             return jsonify({'error': 'Target column not found'}), 400
 
+        # Use user-selected dataset type instead of auto-detecting
+        n_classes = None
+        if dataset_type == 'classification':
+            n_classes = len(current_target.unique())
+            logger.debug(f"Classification dataset with {n_classes} classes")
+        
         # Generate model architecture suggestion using Gemini
         dataset_info = {
             'n_samples': len(df),
             'n_features': len(current_data.columns),
-            'target_type': 'classification' if len(current_target.unique()) < 20 else 'regression',
-            'n_classes': len(current_target.unique()) if len(current_target.unique()) < 20 else None
+            'target_type': dataset_type,  # Use user-selected type
+            'n_classes': n_classes
         }
         logger.debug(f"Dataset info: {dataset_info}")
 
@@ -89,7 +99,7 @@ def upload_dataset():
         - Number of classes: {dataset_info['n_classes']}"""
         
         prompt += """
-        Suggest an optimal neural network architecture for this classification task.  Provide the response as a *pure*, valid JSON string with *no* surrounding text or explanations. Do start with "{" and do not use newline codes or tabs. The JSON should have a "layers" field, an "optimizer" field, a "learning_rate" field, a "loss" field, a "metrics" field, a "batch_size" field, and an "epochs" field.
+        Suggest an optimal neural network architecture for this task.  Provide the response as a *pure*, valid JSON string with *no* surrounding text or explanations. Do start with "{" and do not use newline codes or tabs. The JSON should have a "layers" field, an "optimizer" field, a "learning_rate" field, a "loss" field, a "metrics" field, a "batch_size" field, and an "epochs" field.
         """
         logger.debug(f"Gemini prompt: {prompt}")
 
@@ -103,15 +113,38 @@ def upload_dataset():
         except Exception as e:
             logger.exception("Error calling Gemini API.  Falling back to default architecture.")
             # Fallback to default architecture if Gemini API fails
-            suggested_architecture = {
-                'layers': [
-                    {'type': 'Dense', 'units': 64, 'activation': 'relu'},
-                    {'type': 'Dropout', 'rate': 0.2},
-                    {'type': 'Dense', 'units': 32, 'activation': 'relu'},
-                    {'type': 'Dense', 'units': dataset_info['n_classes'] or 1,
-                     'activation': 'softmax' if dataset_info['target_type'] == 'classification' else 'linear'}
-                ]
-            }
+            if dataset_type == 'classification':
+                output_units = n_classes if n_classes > 2 else 1
+                output_activation = 'softmax' if n_classes > 2 else 'sigmoid'
+                suggested_architecture = {
+                    'layers': [
+                        {'type': 'Dense', 'units': 64, 'activation': 'relu'},
+                        {'type': 'Dropout', 'rate': 0.2},
+                        {'type': 'Dense', 'units': 32, 'activation': 'relu'},
+                        {'type': 'Dense', 'units': output_units, 'activation': output_activation}
+                    ],
+                    'optimizer': 'adam',
+                    'learning_rate': 0.001,
+                    'loss': 'sparse_categorical_crossentropy' if n_classes > 2 else 'binary_crossentropy',
+                    'metrics': ['accuracy'],
+                    'batch_size': 32,
+                    'epochs': 20
+                }
+            else:  # regression
+                suggested_architecture = {
+                    'layers': [
+                        {'type': 'Dense', 'units': 64, 'activation': 'relu'},
+                        {'type': 'Dropout', 'rate': 0.2},
+                        {'type': 'Dense', 'units': 32, 'activation': 'relu'},
+                        {'type': 'Dense', 'units': 1, 'activation': 'linear'}
+                    ],
+                    'optimizer': 'adam',
+                    'learning_rate': 0.01,  # Higher learning rate for regression
+                    'loss': 'mse',
+                    'metrics': ['mae'],
+                    'batch_size': 32,
+                    'epochs': 50  # More epochs for regression
+                }
 
         return jsonify({
             'architecture': suggested_architecture,
@@ -157,11 +190,19 @@ def build_model():
 
         # Create Sequential model
         model = tf.keras.Sequential()
-
+        
+        # For regression problems, automatically add BatchNormalization after the input
+        # This helps with feature scaling and training stability
+        dataset_type = model_config.get('dataset_type', 'classification')
+        if dataset_type == 'regression' or model_config.get('loss') == 'mse' or model_config.get('loss') == 'mae':
+            logger.debug("Adding BatchNormalization layer after input for regression problem stability")
+            model.add(tf.keras.layers.BatchNormalization(input_shape=(input_features,)))
+        
         # Add layers based on config
         for i, layer in enumerate(model_config['architecture']['layers']):
             # Ensure each layer has a type
             layer_type = layer.get('type', 'Dense')  # Default to Dense if type not specified
+            logger.debug(f"Adding layer of type: {layer_type}")
             
             # Get regularization if specified
             regularizer = None
@@ -174,54 +215,166 @@ def build_model():
                 elif reg_type == 'l1_l2':
                     regularizer = tf.keras.regularizers.l1_l2(l1=0.01, l2=0.01)
                 logger.debug(f"Using regularization {reg_type} for layer {i}")
+            
+            # Use better weight initialization - use He for ReLU and Glorot for others
+            kernel_initializer = None
+            if layer.get('activation') == 'relu':
+                kernel_initializer = 'he_uniform'
+            else:
+                kernel_initializer = 'glorot_uniform'
                 
+            # Get the units for Dense/LSTM/GRU layers
+            units = layer.get('units', 32)
+            if layer_type == 'Dropout' or layer_type == 'BatchNormalization':
+                # No units needed for these layers, but keep units variable for code clarity
+                pass
+            elif i == 0 and (layer_type == 'Dense' or layer_type == 'LSTM' or layer_type == 'GRU'):
+                # For first layer, ensure enough representation power
+                # Use at least 2x the number of input features or the specified units, whichever is larger
+                suggested_units = max(input_features * 2, units)
+                if suggested_units > units:
+                    logger.debug(f"Increasing first layer units from {units} to {suggested_units} for better representation")
+                    units = suggested_units
+            
+            logger.debug(f"Layer {i} configuration: Type={layer_type}, Units={units if layer_type not in ['Dropout', 'BatchNormalization'] else 'N/A'}")
+            
+            # First layer needs input shape for most layer types
             if i == 0:
-                # First layer needs input shape
                 if layer_type == 'Dense':
                     model.add(tf.keras.layers.Dense(
-                        units=layer['units'],
+                        units=units, 
                         activation=layer['activation'],
                         kernel_regularizer=regularizer,
-                        input_shape=(input_features,)  # Use the detected input features
+                        kernel_initializer=kernel_initializer,
+                        input_shape=(input_features,)
                     ))
-                else:
-                    if layer_type == 'Dense':
-                        model.add(tf.keras.layers.Dense(
-                            units=layer['units'],
-                            activation=layer['activation'],
-                            kernel_regularizer=regularizer
-                        ))
-                    elif layer_type == 'Dropout':
-                        # Handle the case where rate might not be provided
-                        dropout_rate = layer.get('rate', 0.2)  # Default to 0.2 if not specified
-                        model.add(tf.keras.layers.Dropout(rate=dropout_rate))
+                elif layer_type == 'Dropout':
+                    # Dropout as first layer is unusual but possible
+                    model.add(tf.keras.layers.Dropout(
+                        rate=layer.get('rate', 0.2),
+                        input_shape=(input_features,)
+                    ))
+                elif layer_type == 'LSTM':
+                    # For LSTM, we need to reshape the input to be sequential
+                    # Assume each feature is a time step
+                    model.add(tf.keras.layers.Reshape(
+                        (input_features, 1),
+                        input_shape=(input_features,)
+                    ))
+                    model.add(tf.keras.layers.LSTM(
+                        units=units,
+                        return_sequences=layer.get('return_sequences', False),
+                        kernel_initializer='glorot_uniform'
+                    ))
+                elif layer_type == 'GRU':
+                    # For GRU, we need to reshape the input to be sequential
+                    # Assume each feature is a time step
+                    model.add(tf.keras.layers.Reshape(
+                        (input_features, 1),
+                        input_shape=(input_features,)
+                    ))
+                    model.add(tf.keras.layers.GRU(
+                        units=units,
+                        return_sequences=layer.get('return_sequences', False),
+                        kernel_initializer='glorot_uniform'
+                    ))
+                elif layer_type == 'BatchNormalization':
+                    model.add(tf.keras.layers.BatchNormalization(
+                        input_shape=(input_features,)
+                    ))
+            else:
+                # For subsequent layers, no input_shape needed
+                if layer_type == 'Dense':
+                    model.add(tf.keras.layers.Dense(
+                        units=units,
+                        activation=layer['activation'],
+                        kernel_regularizer=regularizer,
+                        kernel_initializer=kernel_initializer
+                    ))
+                elif layer_type == 'Dropout':
+                    model.add(tf.keras.layers.Dropout(
+                        rate=layer.get('rate', 0.2)
+                    ))
+                elif layer_type == 'Flatten':
+                    model.add(tf.keras.layers.Flatten())
+                elif layer_type == 'LSTM':
+                    model.add(tf.keras.layers.LSTM(
+                        units=units,
+                        return_sequences=layer.get('return_sequences', False),
+                        kernel_initializer='glorot_uniform'
+                    ))
+                elif layer_type == 'GRU':
+                    model.add(tf.keras.layers.GRU(
+                        units=units,
+                        return_sequences=layer.get('return_sequences', False),
+                        kernel_initializer='glorot_uniform'
+                    ))
+                elif layer_type == 'BatchNormalization':
+                    model.add(tf.keras.layers.BatchNormalization())
 
-        # Determine appropriate loss function based on output layer
+        # Get dataset type from model config or use auto-detection as fallback
+        dataset_type = model_config.get('dataset_type')
+        if not dataset_type:
+            # Auto-detect dataset type based on target data
+            if current_target.dtype == 'object' or current_target.dtype.name == 'category' or len(current_target.unique()) < 20:
+                dataset_type = 'classification'
+            else:
+                dataset_type = 'regression'
+            logger.debug(f"Auto-detected dataset type: {dataset_type}")
+        else:
+            logger.debug(f"Using provided dataset type: {dataset_type}")
+            
+        # Determine appropriate loss function based on dataset type and output layer
         loss = model_config.get('loss')
         if not loss:
-            # Auto-detect loss function based on output layer and data type
+            # Get output layer configuration
             output_layer = model_config['architecture']['layers'][-1]
             output_activation = output_layer.get('activation', 'linear')
             
-            if current_target.dtype == 'object' or current_target.dtype.name == 'category':
+            if dataset_type == 'classification':
+                # Classification task
+                logger.debug("Setting classification loss function")
                 unique_values = len(current_target.unique())
                 if unique_values == 2:  # Binary classification
                     loss = 'binary_crossentropy'
+                    logger.debug("Using binary_crossentropy for binary classification")
                 else:  # Multi-class classification
                     loss = 'sparse_categorical_crossentropy'
+                    logger.debug(f"Using sparse_categorical_crossentropy for multi-class classification with {unique_values} classes")
             else:  # Regression
-                loss = 'mse'
+                logger.debug("Setting regression loss function")
+                # Choose appropriate regression loss function based on the activation
+                if output_activation == 'linear':
+                    loss = 'mse'  # Mean Squared Error is standard for regression
+                    logger.debug("Using MSE loss for regression with linear activation")
+                elif output_activation == 'sigmoid' or output_activation == 'relu':
+                    # For bounded outputs
+                    loss = 'mae'  # Mean Absolute Error can be better for bounded regression
+                    logger.debug(f"Using MAE loss for regression with {output_activation} activation")
+                else:
+                    loss = 'mse'  # Default to MSE
+                    logger.debug(f"Using default MSE loss for regression with {output_activation} activation")
                 
-            logger.debug(f"Auto-detected loss function: {loss}")
+            logger.debug(f"Selected loss function: {loss} for activation: {output_activation}")
         
         # Compile model with optimizer from config or default
         optimizer_name = model_config.get('optimizer', 'adam')
-        learning_rate = model_config.get('learning_rate', 0.001)
+        learning_rate = model_config.get('learning_rate')
         
+        # Set appropriate learning rate based on dataset type
+        if not learning_rate:
+            if dataset_type == 'regression':
+                learning_rate = 0.01  # Higher learning rate for regression problems
+                logger.debug(f"Using higher default learning rate {learning_rate} for regression problem")
+            else:
+                learning_rate = 0.001  # Standard learning rate for classification
+                logger.debug(f"Using standard default learning rate {learning_rate} for classification problem")
+        
+        # Use fixed learning rate
         if optimizer_name == 'adam':
             optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
         elif optimizer_name == 'sgd':
-            optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate)
+            optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9)
         elif optimizer_name == 'rmsprop':
             optimizer = tf.keras.optimizers.RMSprop(learning_rate=learning_rate)
         elif optimizer_name == 'adagrad':
@@ -229,13 +382,14 @@ def build_model():
         else:
             optimizer = optimizer_name  # Use string name if not a special case
         
-        # Set appropriate metrics based on loss function
-        if loss.endswith('entropy'):
-            # For classification tasks, use multiple metrics to ensure compatibility
+        # Set appropriate metrics based on dataset type
+        if dataset_type == 'classification':
+            # For classification tasks, use accuracy
             metrics = ['accuracy']
             logger.debug(f"Using classification metrics: {metrics}")
         else:
-            # For regression tasks, use MAE
+            # For regression tasks, use MAE as the primary metric
+            # Only use one metric to avoid confusion in frontend display
             metrics = ['mae']
             logger.debug(f"Using regression metrics: {metrics}")
         
@@ -286,7 +440,8 @@ def train():
             'learning_rate': data.get('learning_rate', 0.001),
             'batch_size': data.get('batch_size', 32),
             'epochs': data.get('epochs', 20),
-            'test_size': data.get('test_size', 0.2)  # Default to 20% test data
+            'test_size': data.get('test_size', 0.2),  # Default to 20% test data
+            'infinite_training': data.get('infinite_training', False)  # New option for infinite training
         }
         
         # Set training flag to true
@@ -303,10 +458,25 @@ def train():
         logger.exception("Exception in train route.")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/stop_training', methods=['POST'])
+def stop_training():
+    """Endpoint to stop training in infinite mode"""
+    global stop_training_flag
+    
+    logger.info("User requested to stop training")
+    stop_training_flag = True
+    return jsonify({
+        'success': True, 
+        'message': 'Training stop requested. It will stop after the current epoch completes.'
+    })
+
 @app.route('/train_stream')
 def train_stream():
     def generate():
-        global training_in_progress
+        global training_in_progress, stop_training_flag
+        # Reset stop flag at the beginning of training
+        stop_training_flag = False
+        
         try:
             # Check if we have data to train on
             if current_data is None or current_target is None:
@@ -345,8 +515,30 @@ def train_stream():
             if y.dtype == 'object' or y.dtype.name == 'category':
                 y = label_encoder.fit_transform(y)
 
-            # Scale features
+            # Scale features - improve this to ensure better normalization
             X_scaled = scaler.fit_transform(X)
+            
+            # Store original target values for regression problems (for prediction conversion later)
+            y_min, y_max = None, None
+            
+            # Check if this might be a regression problem
+            is_regression = current_target.dtype != 'object' and current_target.dtype.name != 'category'
+            if is_regression:
+                logger.debug("Detected regression problem, ensuring target is properly scaled if needed")
+                # For regression, normalize the target if it has a large range
+                target_range = np.max(y) - np.min(y)
+                
+                # Always store the original range for later reference
+                y_min, y_max = np.min(y), np.max(y)
+                
+                if target_range > 10:  # If range is large, scale the target
+                    logger.debug(f"Target range is large ({target_range}), scaling target values from [{y_min}, {y_max}] to [0,1]")
+                    
+                    # Scale to [0,1] range for better training stability
+                    y = (y - y_min) / (y_max - y_min)
+                    logger.debug(f"Target scaled, new range: [{np.min(y)}, {np.max(y)}]")
+            else:
+                logger.debug("Detected classification problem, no target scaling needed")
 
             # Get training parameters
             global training_config
@@ -356,7 +548,8 @@ def train_stream():
                     'learning_rate': 0.001,
                     'batch_size': 32,
                     'epochs': 20,
-                    'test_size': 0.2
+                    'test_size': 0.2,
+                    'infinite_training': False
                 }
             
             # Split data with configurable test size
@@ -376,20 +569,19 @@ def train_stream():
                     # Log all available keys for debugging
                     logger.debug(f"Epoch {epoch} logs: {logs}")
                     
-                    # Extract accuracy metrics, handling different possible metric names
-                    acc = logs.get('accuracy', logs.get('acc', 0))
-                    val_acc = logs.get('val_accuracy', logs.get('val_acc', 0))
+                    # Check if we have accuracy metrics or regression metrics
+                    is_regression = all(metric not in logs for metric in ['accuracy', 'acc'])
                     
-                    # For regression models or if accuracy is not found, calculate from loss
-                    if acc == 0 and 'loss' in logs:
-                        # Infer if this is a classification model based on loss function name
-                        loss_name = current_model.loss
-                        if isinstance(loss_name, str) and 'entropy' in loss_name:
-                            # This is likely a classification model, but accuracy wasn't calculated
-                            # We'll log this issue but keep the 0 value
-                            logger.warning(f"Classification model detected but accuracy metrics not found in logs: {logs.keys()}")
-                    
-                    logger.debug(f"Extracted accuracy: {acc}, val_accuracy: {val_acc}")
+                    if is_regression:
+                        # For regression models, we'll use mae as our main metric
+                        acc = logs.get('mae', 0)
+                        val_acc = logs.get('val_mae', 0)
+                        logger.debug(f"Regression metrics - mae: {acc}, val_mae: {val_acc}")
+                    else:
+                        # For classification models, use standard accuracy
+                        acc = logs.get('accuracy', logs.get('acc', 0))
+                        val_acc = logs.get('val_accuracy', logs.get('val_acc', 0))
+                        logger.debug(f"Classification metrics - accuracy: {acc}, val_accuracy: {val_acc}")
                     
                     # Create data packet for frontend
                     data = {
@@ -398,14 +590,35 @@ def train_stream():
                         'loss': float(logs.get('loss', 0)),
                         'val_loss': float(logs.get('val_loss', 0)),
                         'acc': float(acc),
-                        'val_acc': float(val_acc)
+                        'val_acc': float(val_acc),
+                        'is_regression': is_regression
                     }
                     
                     logger.debug(f"Sending to frontend: {data}")
                     update_queue.put(data)
+                    
+                    # Check if we should stop training (for infinite mode)
+                    if stop_training_flag:
+                        logger.info("Stopping training as requested by user")
+                        self.model.stop_training = True
 
-            # Train model with callback
+            # Train model with callbacks
             model_callback = StreamCallback()
+            
+            # Only use the stream callback - no early stopping as requested
+            callbacks = [model_callback]
+            
+            # No early stopping callback - removed as requested by user
+            
+            # Add reduce learning rate on plateau
+            reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+                monitor='val_loss',
+                factor=0.2,
+                patience=5,
+                min_lr=0.0001,
+                verbose=1
+            )
+            callbacks.append(reduce_lr)
             
             # Start training in a separate thread
             from threading import Thread
@@ -429,28 +642,83 @@ def train_stream():
                     if is_classification:
                         logger.debug(f"Number of classes: {len(np.unique(y_train))}")
                     
+                    # Determine epochs based on infinite training setting
+                    epochs = 9999 if training_config.get('infinite_training', False) else training_config['epochs']
+                    logger.debug(f"Training mode: {'Infinite' if training_config.get('infinite_training', False) else 'Fixed'}, epochs={epochs}")
+                    
                     # Start the training process
                     history = current_model.fit(
                         X_train, y_train,
-                        epochs=training_config['epochs'],
+                        epochs=epochs,
                         batch_size=training_config['batch_size'],
                         validation_data=(X_test, y_test),
-                        callbacks=[model_callback],
+                        callbacks=callbacks,
                         verbose=1
                     )
                     
                     # Log training completion
                     logger.debug(f"Training completed. History keys: {history.history.keys()}")
                     
-                    # Put completion message in queue
-                    test_loss, test_acc = current_model.evaluate(X_test, y_test, verbose=0)
-                    logger.debug(f"Final test metrics - loss: {test_loss}, accuracy: {test_acc}")
+                    # Check if this is a regression or classification task
+                    is_regression = not (current_target.dtype == 'object' or current_target.dtype.name == 'category')
+                    logger.debug(f"Task is regression: {is_regression}")
                     
-                    completion_data = {
-                        'status': 'completed',
-                        'test_accuracy': float(test_acc),
-                        'test_loss': float(test_loss)
-                    }
+                    # Evaluate model - different handling for regression and classification
+                    if is_regression:
+                        # For regression, we want MAE (mean absolute error)
+                        # Single evaluation call, extract required metrics
+                        evaluation = current_model.evaluate(X_test, y_test, verbose=0)
+                        
+                        # Handle different return types (scalar or array)
+                        if isinstance(evaluation, list):
+                            # If multiple metrics, first is always loss, then metrics in order
+                            test_loss = evaluation[0]
+                            # If MAE is available use it
+                            if 'mae' in current_model.metrics_names:
+                                mae_idx = current_model.metrics_names.index('mae')
+                                test_mae = evaluation[mae_idx]
+                            elif len(evaluation) > 1:
+                                # Use the second metric as our accuracy equivalent
+                                test_mae = evaluation[1]
+                            else:
+                                # If no MAE, just use the loss
+                                test_mae = test_loss
+                        else:
+                            # If just a scalar returned, it's the loss
+                            test_loss = evaluation
+                            test_mae = evaluation
+                        
+                        logger.debug(f"Regression evaluation - Loss: {test_loss}, MAE: {test_mae}")
+                        
+                        # For frontend display, MAE is our "accuracy" equivalent 
+                        # Lower is better, but we need to transform it for consistent UI display
+                        # Convert it to a range of 0-1 where 1 is best (opposite of error)
+                        # First, ensure we don't divide by zero by adding a small epsilon
+                        epsilon = 1e-10
+                        # Transform MAE to a 0-1 scale where 1 is best (using exponential decay)
+                        # This gives a more intuitive representation in the UI
+                        normalized_mae = np.exp(-test_mae)
+                        
+                        completion_data = {
+                            'status': 'completed',
+                            'test_accuracy': float(normalized_mae),  # Transformed value for UI consistency
+                            'test_loss': float(test_loss),
+                            'test_mae_raw': float(test_mae),  # Include the raw MAE for reference
+                            'is_regression': True
+                        }
+                    else:
+                        # For classification, we want accuracy
+                        test_loss, test_acc = current_model.evaluate(X_test, y_test, verbose=0)
+                        logger.debug(f"Classification evaluation - Loss: {test_loss}, Accuracy: {test_acc}")
+                        
+                        completion_data = {
+                            'status': 'completed',
+                            'test_accuracy': float(test_acc),
+                            'test_loss': float(test_loss),
+                            'is_regression': False
+                        }
+                    
+                    logger.debug(f"Sending completion data to frontend: {completion_data}")
                     update_queue.put(completion_data)
                 except Exception as e:
                     logger.exception("Error during model training")
@@ -607,6 +875,52 @@ def generate_code():
         logger.exception("Exception in generate_code route.")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/back_to_model', methods=['POST'])
+def back_to_model():
+    """
+    Handle going back to the model from the generated code view.
+    This maintains the current model and training state.
+    """
+    logger.debug("Entering back_to_model route")
+    try:
+        # Keep the current model configuration and return info needed for the model view
+        response = {
+            'success': True,
+            'message': 'Returned to model view from code generation'
+        }
+        
+        # Add model_summary if available
+        if current_model is not None:
+            # Get model summary
+            stringio = io.StringIO()
+            current_model.summary(print_fn=lambda x: stringio.write(x + '\n'))
+            summary_string = stringio.getvalue()
+            stringio.close()
+            
+            response['model_summary'] = summary_string
+            
+            # Check if model has been trained
+            if hasattr(current_model, 'history') and current_model.history is not None:
+                response['trained'] = True
+            else:
+                response['trained'] = False
+        
+        # Add dataset info if available
+        if current_data is not None and current_target is not None:
+            dataset_info = {
+                'n_samples': len(current_data) + len(current_target),
+                'n_features': len(current_data.columns),
+                'target_type': 'classification' if len(current_target.unique()) < 20 else 'regression',
+                'n_classes': len(current_target.unique()) if len(current_target.unique()) < 20 else None
+            }
+            response['dataset_info'] = dataset_info
+            
+        return jsonify(response)
+    
+    except Exception as e:
+        logger.exception("Exception in back_to_model route.")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/go_back', methods=['POST'])
 def go_back():
     """
@@ -723,9 +1037,10 @@ def generate_model_code():
     code = f"""
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout
+from tensorflow.keras.layers import Dense, Dropout, Flatten, LSTM, GRU, BatchNormalization, Reshape
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.model_selection import train_test_split
 
@@ -748,7 +1063,7 @@ def preprocess_data(df, target_column):
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    return X_scaled, y, scaler
+    return X_scaled, y, scaler, le
 
 # Build model with your custom architecture
 def build_model(input_dim={current_data.shape[1] if current_data is not None else 'your_input_dimension'}):
@@ -757,7 +1072,9 @@ def build_model(input_dim={current_data.shape[1] if current_data is not None els
 
     # Generate layer code based on the actual model layers
     for i, layer_config in enumerate(layer_configs):
-        if layer_config['type'] == 'Dense':
+        layer_type = layer_config['type']
+        
+        if layer_type == 'Dense':
             units = layer_config['config']['units']
             activation = layer_config['config']['activation']
             
@@ -778,13 +1095,65 @@ def build_model(input_dim={current_data.shape[1] if current_data is not None els
                     l2_value = reg_config.get('config', {}).get('l2', 0.01)
                     regularization = f", kernel_regularizer=tf.keras.regularizers.l1_l2(l1={l1_value}, l2={l2_value})"
             
-            if i == 0:
-                code += f"    model.add(Dense({units}, activation='{activation}', input_shape=(input_dim,){regularization}))\n"
+            # Use better weight initialization - use He for ReLU and Glorot for others
+            kernel_initializer = None
+            activation = layer_config['config'].get('activation', 'linear')
+            if activation == 'relu':
+                kernel_initializer = 'he_uniform'
             else:
-                code += f"    model.add(Dense({units}, activation='{activation}'{regularization}))\n"
-        elif layer_config['type'] == 'Dropout':
+                kernel_initializer = 'glorot_uniform'
+            
+            # Get the units for Dense/LSTM/GRU layers
+            units = layer_config['config'].get('units', 32)
+            
+            # Add input dimension check for first layer
+            input_dim = current_data.shape[1] if current_data is not None else 'input_dim'
+            
+            logger.debug(f"Layer {i} configuration: Type={layer_type}, Units={units if layer_type not in ['Dropout', 'BatchNormalization'] else 'N/A'}")
+            
+            # First layer needs input shape for most layer types
+            if i == 0:
+                code += f"    model.add(Dense({units}, activation='{activation}', input_shape=(input_dim,){regularization}, kernel_initializer='{kernel_initializer}'))\n"
+            else:
+                code += f"    model.add(Dense({units}, activation='{activation}'{regularization}, kernel_initializer='{kernel_initializer}'))\n"
+        
+        elif layer_type == 'Dropout':
             rate = layer_config['config']['rate']
             code += f"    model.add(Dropout({rate}))\n"
+        
+        elif layer_type == 'Reshape':
+            target_shape = layer_config['config']['target_shape']
+            code += f"    model.add(Reshape({target_shape}, input_shape=(input_dim,)))\n"
+            
+        elif layer_type == 'Flatten':
+            code += f"    model.add(Flatten())\n"
+            
+        elif layer_type == 'LSTM':
+            units = layer_config['config']['units']
+            return_sequences = layer_config['config'].get('return_sequences', False)
+            if i == 0:
+                code += f"    # For LSTM with tabular data, reshaping input features as time steps\n"
+                code += f"    model.add(Reshape((input_dim, 1), input_shape=(input_dim,)))\n"
+                code += f"    model.add(LSTM({units}, return_sequences={return_sequences}, kernel_initializer='glorot_uniform'))\n"
+            else:
+                code += f"    model.add(LSTM({units}, return_sequences={return_sequences}, kernel_initializer='glorot_uniform'))\n"
+                
+        elif layer_type == 'GRU':
+            units = layer_config['config']['units']
+            return_sequences = layer_config['config'].get('return_sequences', False)
+            if i == 0:
+                code += f"    # For GRU with tabular data, reshaping input features as time steps\n"
+                code += f"    model.add(Reshape((input_dim, 1), input_shape=(input_dim,)))\n"
+                code += f"    model.add(GRU({units}, return_sequences={return_sequences}, kernel_initializer='glorot_uniform'))\n"
+            else:
+                code += f"    model.add(GRU({units}, return_sequences={return_sequences}, kernel_initializer='glorot_uniform'))\n"
+                
+        elif layer_type == 'BatchNormalization':
+            code += f"    model.add(BatchNormalization())\n"
+            
+        else:
+            # For any other layer types
+            code += f"    # Layer type '{layer_type}' included in original model\n"
 
     # Use the current optimizer and loss function
     optimizer_config = f"'{optimizer}'"
@@ -797,27 +1166,102 @@ def build_model(input_dim={current_data.shape[1] if current_data is not None els
     return model
 
 # Train model
-def train_model(model, X_train, y_train, X_test, y_test, epochs={epochs}, batch_size={batch_size}):
-    history = model.fit(
-        X_train, y_train,
-        epochs=epochs,
-        batch_size=batch_size,
-        validation_data=(X_test, y_test),
-        verbose=1
-    )
+def train_model(model, X_train, y_train, X_test, y_test, epochs={epochs}, batch_size={batch_size}, is_infinite=False):
+    # No early stopping callback - removed as requested
+    callbacks = []
+    if is_infinite:
+        print("Training in infinite mode. Press Ctrl+C to stop training when satisfied.")
+    
+    try:
+        history = model.fit(
+            X_train, y_train,
+            epochs=999999 if is_infinite else epochs,  # Use very large number for infinite mode
+            batch_size=batch_size,
+            validation_data=(X_test, y_test),
+            verbose=1,
+            callbacks=callbacks  # Empty callbacks list - no early stopping
+        )
+    except KeyboardInterrupt:
+        print("Training stopped by user.")
+    
     return history
 
 # Evaluate model
 def evaluate_model(model, X_test, y_test):
     test_loss, test_acc = model.evaluate(X_test, y_test, verbose=0)
+    print(f"Test accuracy: {{test_acc:.4f}}")
+    print(f"Test loss: {{test_loss:.4f}}")
     return test_loss, test_acc
 
+# Plot training history
+def plot_training_history(history):
+    # Plot training & validation accuracy values
+    plt.figure(figsize=(12, 5))
+    
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['loss'])
+    plt.plot(history.history['val_loss'])
+    plt.title('Model loss')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.legend(['Train', 'Validation'], loc='upper right')
+    
+    # Check if accuracy metrics exist in history
+    if 'accuracy' in history.history:
+        plt.subplot(1, 2, 2)
+        plt.plot(history.history['accuracy'])
+        plt.plot(history.history['val_accuracy'])
+        plt.title('Model accuracy')
+        plt.ylabel('Accuracy')
+        plt.xlabel('Epoch')
+        plt.legend(['Train', 'Validation'], loc='lower right')
+    elif 'mae' in history.history:
+        plt.subplot(1, 2, 2)
+        plt.plot(history.history['mae'])
+        plt.plot(history.history['val_mae'])
+        plt.title('Model MAE')
+        plt.ylabel('MAE')
+        plt.xlabel('Epoch')
+        plt.legend(['Train', 'Validation'], loc='upper right')
+    
+    plt.tight_layout()
+    plt.savefig('training_history.png')
+    plt.show()
+
 # Make predictions
-def predict(model, X_new, scaler):
+def predict(model, X_new, scaler, label_encoder=None):
     # Scale new data using the same scaler
     X_new_scaled = scaler.transform(X_new)
     predictions = model.predict(X_new_scaled)
+    
+    # For classification with label encoder, convert back to original labels
+    if label_encoder is not None and hasattr(label_encoder, 'inverse_transform'):
+        if predictions.shape[1] > 1:  # Multi-class classification
+            predictions = np.argmax(predictions, axis=1)
+        else:  # Binary classification
+            predictions = (predictions > 0.5).astype(int).flatten()
+        predictions = label_encoder.inverse_transform(predictions)
+    
     return predictions
+
+# Visualize predictions (for regression)
+def visualize_predictions(X_test, y_test, predictions):
+    plt.figure(figsize=(10, 6))
+    
+    # Sort the data for line plot
+    sort_idx = np.argsort(X_test[:, 0])
+    X_sorted = X_test[sort_idx, 0]
+    y_sorted = y_test[sort_idx]
+    predictions_sorted = predictions[sort_idx]
+    
+    plt.scatter(X_sorted, y_sorted, label='Actual values', alpha=0.6)
+    plt.plot(X_sorted, predictions_sorted, color='red', linewidth=2, label='Predictions')
+    plt.title('Model Predictions vs Actual Values')
+    plt.xlabel('Feature')
+    plt.ylabel('Target')
+    plt.legend()
+    plt.savefig('prediction_visualization.png')
+    plt.show()
 
 # Example usage
 if __name__ == "__main__":
@@ -825,28 +1269,322 @@ if __name__ == "__main__":
     df = pd.read_csv('your_data.csv')
 
     # Preprocess
-    X, y, scaler = preprocess_data(df, 'target_column')
+    X, y, scaler, label_encoder = preprocess_data(df, 'target_column')
 
     # Split data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size={test_size}, random_state=42)
 
     # Build and train model
     model = build_model(input_dim=X.shape[1])  # Pass input dimension dynamically
-    history = train_model(model, X_train, y_train, X_test, y_test)
+    
+    # Choose whether to use infinite training mode
+    use_infinite_training = False  # Change to True for infinite training
+    
+    history = train_model(model, X_train, y_train, X_test, y_test, is_infinite=use_infinite_training)
 
     # Evaluate
     test_loss, test_acc = evaluate_model(model, X_test, y_test)
-    print(f"Test Accuracy: {{test_acc:.4f}}")
-    print(f"Test Loss: {{test_loss:.4f}}")
+    
+    # Plot training history
+    plot_training_history(history)
 
     # Save model
     model.save('model.h5')
     
     # Quick model summary
     model.summary()
+    
+    # Make predictions on test data
+    predictions = predict(model, X_test, scaler, label_encoder)
+    
+    # Visualize predictions if it's a regression task
+    if len(np.unique(y)) > 10:  # Assuming regression if many unique values
+        visualize_predictions(X_test, y_test, predictions)
 """
 
     return code
+
+@app.route('/predict', methods=['POST'])
+def make_prediction():
+    """Endpoint for making predictions using the trained model"""
+    global current_model, current_data, scaler, label_encoder
+    
+    try:
+        if current_model is None:
+            return jsonify({'error': 'No model has been trained yet'}), 400
+            
+        # Get prediction data from request
+        data = request.json
+        input_data = data.get('input_data')
+        
+        if not input_data:
+            # If no specific input data is provided, use a sample from the test data
+            # Create test data if not already done
+            if current_data is None:
+                return jsonify({'error': 'No dataset has been uploaded'}), 400
+                
+            # Preprocess the data
+            X = current_data
+            y = current_target
+            
+            # Handle categorical features
+            for col in X.select_dtypes(include=['object']).columns:
+                X[col] = LabelEncoder().fit_transform(X[col])
+                
+            # Scale features
+            X_scaled = scaler.transform(X)
+            
+            # Split to get test data
+            _, X_test, _, y_test = train_test_split(
+                X_scaled, y, test_size=0.2, random_state=42
+            )
+            
+            # Use a small sample for prediction
+            sample_size = min(10, len(X_test))
+            sample_indices = np.random.choice(len(X_test), sample_size, replace=False)
+            X_sample = X_test[sample_indices]
+            y_sample = y_test.iloc[sample_indices] if hasattr(y_test, 'iloc') else y_test[sample_indices]
+            
+            # Make predictions
+            predictions = current_model.predict(X_sample)
+            
+            # Convert predictions to proper format
+            if len(predictions.shape) > 1 and predictions.shape[1] > 1:
+                # Multi-class classification
+                pred_labels = np.argmax(predictions, axis=1)
+                if hasattr(label_encoder, 'inverse_transform'):
+                    pred_labels = label_encoder.inverse_transform(pred_labels)
+            elif len(predictions.shape) > 1:
+                # Binary classification
+                pred_labels = (predictions > 0.5).astype(int).flatten()
+                if hasattr(label_encoder, 'inverse_transform'):
+                    pred_labels = label_encoder.inverse_transform(pred_labels)
+            else:
+                # Regression
+                pred_labels = predictions
+            
+            # Generate visualization if regression or binary classification
+            visualization_url = None
+            if len(np.unique(y)) > 10:  # Regression
+                visualization_url = generate_regression_visualization(X_sample, y_sample, predictions)
+            elif len(np.unique(y)) == 2:  # Binary classification
+                visualization_url = generate_classification_visualization(X_sample, y_sample, predictions)
+            
+            # Format response
+            result = {
+                'success': True,
+                'predictions': pred_labels.tolist() if hasattr(pred_labels, 'tolist') else pred_labels,
+                'actual_values': y_sample.tolist() if hasattr(y_sample, 'tolist') else y_sample,
+                'visualization_url': visualization_url
+            }
+            
+            return jsonify(result)
+        else:
+            # Process custom input data
+            # Convert input data to DataFrame if it's not already
+            if not isinstance(input_data, pd.DataFrame):
+                input_df = pd.DataFrame(input_data)
+            else:
+                input_df = input_data
+                
+            # Make sure it has the same columns as the training data
+            if current_data is not None:
+                missing_cols = set(current_data.columns) - set(input_df.columns)
+                if missing_cols:
+                    return jsonify({'error': f'Input data missing required columns: {missing_cols}'}), 400
+            
+            # Preprocess input data
+            # Handle categorical features
+            for col in input_df.select_dtypes(include=['object']).columns:
+                input_df[col] = LabelEncoder().fit_transform(input_df[col])
+                
+            # Scale features
+            input_scaled = scaler.transform(input_df)
+            
+            # Make predictions
+            predictions = current_model.predict(input_scaled)
+            
+            # Convert predictions to proper format
+            if len(predictions.shape) > 1 and predictions.shape[1] > 1:
+                # Multi-class classification
+                pred_labels = np.argmax(predictions, axis=1)
+                if hasattr(label_encoder, 'inverse_transform'):
+                    pred_labels = label_encoder.inverse_transform(pred_labels)
+            elif len(predictions.shape) > 1:
+                # Binary classification
+                pred_labels = (predictions > 0.5).astype(int).flatten()
+                if hasattr(label_encoder, 'inverse_transform'):
+                    pred_labels = label_encoder.inverse_transform(pred_labels)
+            else:
+                # Regression
+                pred_labels = predictions
+            
+            return jsonify({
+                'success': True,
+                'predictions': pred_labels.tolist() if hasattr(pred_labels, 'tolist') else pred_labels
+            })
+    
+    except Exception as e:
+        logger.exception("Error in prediction endpoint")
+        return jsonify({'error': str(e)}), 500
+
+def generate_regression_visualization(X_sample, y_sample, predictions):
+    """Generate a visualization for regression predictions"""
+    try:
+        plt.figure(figsize=(10, 6))
+        
+        # Sort the data for line plot if X has only one feature
+        if X_sample.shape[1] == 1:
+            sort_idx = np.argsort(X_sample[:, 0])
+            X_sorted = X_sample[sort_idx, 0]
+            y_sorted = y_sample[sort_idx] if isinstance(y_sample, np.ndarray) else y_sample.values[sort_idx]
+            predictions_sorted = predictions[sort_idx]
+            
+            plt.scatter(X_sorted, y_sorted, label='Actual values', alpha=0.6)
+            plt.plot(X_sorted, predictions_sorted, color='red', linewidth=2, label='Predictions')
+        else:
+            # If more than one feature, plot actual vs predicted
+            plt.scatter(y_sample, predictions, alpha=0.6)
+            
+            # Add a perfect prediction line
+            min_val = min(np.min(y_sample), np.min(predictions))
+            max_val = max(np.max(y_sample), np.max(predictions))
+            plt.plot([min_val, max_val], [min_val, max_val], 'k--', lw=2)
+            
+            plt.xlabel('Actual Values')
+            plt.ylabel('Predicted Values')
+        
+        plt.title('Model Predictions vs Actual Values')
+        plt.legend()
+        
+        # Save the plot to a temporary file
+        img_name = f'prediction_viz_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
+        img_path = os.path.join('static', img_name)
+        
+        # Make sure the static directory exists
+        os.makedirs('static', exist_ok=True)
+        
+        plt.savefig(img_path)
+        plt.close()
+        
+        return f'/static/{img_name}'
+    
+    except Exception as e:
+        logger.exception("Error generating regression visualization")
+        return None
+
+def generate_classification_visualization(X_sample, y_sample, predictions):
+    """Generate a visualization for classification predictions"""
+    try:
+        # For now, we'll just create a simple bar chart comparing actual vs predicted
+        plt.figure(figsize=(10, 6))
+        
+        # Convert predictions to binary if they're probabilities
+        if len(predictions.shape) > 1:
+            pred_labels = (predictions > 0.5).astype(int).flatten()
+        else:
+            pred_labels = predictions
+            
+        # Count correct and incorrect predictions
+        correct = np.sum(pred_labels == y_sample)
+        incorrect = len(y_sample) - correct
+        
+        # Create bar chart
+        plt.bar(['Correct', 'Incorrect'], [correct, incorrect])
+        plt.title('Prediction Accuracy')
+        plt.ylabel('Count')
+        
+        # Add a pie chart for class distribution
+        plt.figure(figsize=(8, 8))
+        class_names = ['Class 0', 'Class 1']
+        if hasattr(label_encoder, 'classes_'):
+            class_names = label_encoder.classes_
+            
+        plt.pie([np.sum(pred_labels == 0), np.sum(pred_labels == 1)], 
+                labels=class_names,
+                autopct='%1.1f%%',
+                shadow=True,
+                startangle=90)
+        plt.axis('equal')
+        plt.title('Predicted Class Distribution')
+        
+        # Save the plots to a temporary file
+        img_name = f'classification_viz_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
+        img_path = os.path.join('static', img_name)
+        
+        # Make sure the static directory exists
+        os.makedirs('static', exist_ok=True)
+        
+        plt.savefig(img_path)
+        plt.close('all')
+        
+        return f'/static/{img_name}'
+    
+    except Exception as e:
+        logger.exception("Error generating classification visualization")
+        return None
+
+@app.route('/get_training_plot')
+def get_training_plot():
+    """Generate and return a plot of training history"""
+    global current_model
+    
+    try:
+        if not hasattr(current_model, 'history') or not current_model.history or not current_model.history.history:
+            return jsonify({'error': 'No training history available'}), 404
+            
+        history = current_model.history.history
+        
+        plt.figure(figsize=(12, 5))
+        
+        # Plot loss
+        plt.subplot(1, 2, 1)
+        plt.plot(history['loss'])
+        if 'val_loss' in history:
+            plt.plot(history['val_loss'])
+            plt.legend(['Training', 'Validation'])
+        plt.title('Model Loss')
+        plt.xlabel('Epoch')
+        plt.ylabel('Loss')
+        
+        # Plot accuracy or MAE
+        plt.subplot(1, 2, 2)
+        if 'accuracy' in history:
+            plt.plot(history['accuracy'])
+            if 'val_accuracy' in history:
+                plt.plot(history['val_accuracy'])
+            plt.title('Model Accuracy')
+            plt.ylabel('Accuracy')
+            plt.legend(['Training', 'Validation'])
+        elif 'mae' in history:
+            plt.plot(history['mae'])
+            if 'val_mae' in history:
+                plt.plot(history['val_mae'])
+            plt.title('Model MAE')
+            plt.ylabel('MAE')
+            plt.legend(['Training', 'Validation'])
+        
+        plt.xlabel('Epoch')
+        plt.tight_layout()
+        
+        # Save the plot to a temporary file
+        img_name = f'training_history_{datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
+        img_path = os.path.join('static', img_name)
+        
+        # Make sure the static directory exists
+        os.makedirs('static', exist_ok=True)
+        
+        plt.savefig(img_path)
+        plt.close()
+        
+        return jsonify({
+            'success': True,
+            'plot_url': f'/static/{img_name}'
+        })
+        
+    except Exception as e:
+        logger.exception("Error generating training plot")
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=False)  # Keep debug=True for development

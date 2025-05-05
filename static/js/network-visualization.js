@@ -22,7 +22,8 @@ class NeuralNetworkVis {
             onNeuronAdd: null,
             onNeuronRemove: null,
             onActivationChange: null,
-            onRegularizationChange: null
+            onRegularizationChange: null,
+            onLayerTypeChange: null
         };
 
         // Override default config with provided values
@@ -35,6 +36,7 @@ class NeuralNetworkVis {
         this.selectedNeuron = null;
         this.activationFunctions = ['relu', 'sigmoid', 'tanh', 'linear', 'softmax'];
         this.regularizationOptions = ['none', 'l1', 'l2', 'l1_l2'];
+        this.layerTypes = ['Dense', 'Dropout', 'BatchNormalization', 'LSTM', 'GRU'];
         
         // Add zoom properties
         this.zoom = null;
@@ -344,6 +346,43 @@ class NeuralNetworkVis {
                 return `translate(${d.x}, ${d.y - totalHeight / 2 - 50})`;
             })
             .call(g => {
+                // Add layer type dropdown for hidden layers only
+                g.filter(d => d.type === 'hidden')
+                .append('foreignObject')
+                    .attr('x', -60)
+                    .attr('y', -75)
+                    .attr('width', 120)
+                    .attr('height', 30)
+                    .append('xhtml:div')
+                    .html(d => {
+                        // Define available layer types for CSV data
+                        const layerTypes = [
+                            { value: 'Dense', label: 'Dense' },
+                            { value: 'Dropout', label: 'Dropout' },
+                            { value: 'BatchNormalization', label: 'BatchNorm' },
+                            { value: 'LSTM', label: 'LSTM' },
+                            { value: 'GRU', label: 'GRU' }
+                        ];
+                        
+                        // Generate options HTML
+                        let options = '';
+                        layerTypes.forEach(type => {
+                            // If the layer has a type property, use it, otherwise default to 'Dense'
+                            const currentType = d.layerType || 'Dense';
+                            const selected = type.value === currentType ? 'selected' : '';
+                            options += `<option value="${type.value}" ${selected}>${type.label}</option>`;
+                        });
+                        
+                        return `<select class="layer-type form-select form-select-sm" data-layer="${d.id}">
+                                ${options}
+                            </select>`;
+                    })
+                    .on('change', function(event) {
+                        const layerId = this.querySelector('select').getAttribute('data-layer');
+                        const layerType = this.querySelector('select').value;
+                        self.updateLayerType(layerId, layerType);
+                    });
+
                 // Add activation function dropdown for hidden and output layers
                 g.filter(d => d.type === 'hidden' || d.type === 'output')
                 .append('foreignObject')
@@ -694,13 +733,93 @@ class NeuralNetworkVis {
     }
     
     updateLayerRegularization(layerId, regularization) {
+        // Find layer by ID
         const layer = this.layers.find(l => l.id === layerId);
         if (layer) {
             layer.regularization = regularization;
-            
+            // Call callback if configured
             if (this.config.onRegularizationChange) {
-                this.config.onRegularizationChange({ layerId, regularization });
+                this.config.onRegularizationChange(layerId, regularization);
             }
+        }
+    }
+    
+    updateLayerType(layerId, layerType) {
+        // Find layer by ID
+        const layer = this.layers.find(l => l.id === layerId);
+        if (layer) {
+            // Store previous layer type
+            const previousType = layer.layerType || 'Dense';
+            
+            // Store the current layer type
+            layer.layerType = layerType;
+            
+            // Adjust neurons based on layer type
+            if (layerType === 'Dropout') {
+                // For Dropout, we keep only one neuron for visualization
+                if (previousType !== 'Dropout' && layer.neurons.length > 1) {
+                    // Keep only the first neuron if switching to Dropout
+                    const firstNeuron = layer.neurons[0];
+                    layer.neurons = [firstNeuron];
+                }
+                
+                // For Dropout, we might want to show the dropout rate instead of neurons
+                const layerGroup = this.layersGroup.select(`#layer-${layer.id}`);
+                layerGroup.selectAll('.neuron circle')
+                    .style('stroke-dasharray', '4,2')
+                    .attr('fill-opacity', 0.7);
+            } else if (layerType === 'BatchNormalization') {
+                // For BatchNormalization, similar to Dropout
+                if (previousType !== 'BatchNormalization' && layer.neurons.length > 1) {
+                    // Keep only the first neuron for BatchNormalization
+                    const firstNeuron = layer.neurons[0];
+                    layer.neurons = [firstNeuron];
+                }
+                
+                // Update visual appearance
+                const layerGroup = this.layersGroup.select(`#layer-${layer.id}`);
+                layerGroup.selectAll('.neuron circle')
+                    .style('stroke-dasharray', null)
+                    .style('stroke', '#1e88e5')
+                    .attr('fill-opacity', 0.9);
+            } else {
+                // Reset visual attributes for other layer types
+                const layerGroup = this.layersGroup.select(`#layer-${layer.id}`);
+                layerGroup.selectAll('.neuron circle')
+                    .style('stroke-dasharray', null)
+                    .style('stroke-width', '1.5px')
+                    .style('stroke', '#333')
+                    .attr('fill-opacity', 1);
+                
+                // If previous type was Dropout or BatchNormalization and had 1 neuron,
+                // add a second neuron when switching to a regular layer type
+                if ((previousType === 'Dropout' || previousType === 'BatchNormalization') && 
+                    layer.neurons.length === 1) {
+                    // Add a second neuron
+                    const newNeuronId = `${layer.id}_n${layer.neurons.length + 1}`;
+                    layer.neurons.push({
+                        id: newNeuronId,
+                        value: '',
+                        layer: layer.id
+                    });
+                }
+            }
+            
+            // If this is a LSTM or GRU layer, we might want to indicate that it's for sequential data
+            if (layerType === 'LSTM' || layerType === 'GRU') {
+                const layerGroup = this.layersGroup.select(`#layer-${layer.id}`);
+                layerGroup.selectAll('.neuron circle')
+                    .style('stroke-width', '3px')
+                    .style('stroke', '#FFA500');
+            }
+            
+            // Call callback if configured
+            if (this.config.onLayerTypeChange) {
+                this.config.onLayerTypeChange(layerId, layerType);
+            }
+            
+            // Update the UI to reflect the change
+            this.requestRender();
         }
     }
     
@@ -864,6 +983,14 @@ class NeuralNetworkVis {
         
         const layer = this.layers[layerIndex];
         
+        // Check if this layer type supports adding neurons
+        // Dropout and BatchNormalization layers don't use neurons in the same way
+        if (layer.layerType === 'Dropout' || layer.layerType === 'BatchNormalization') {
+            console.log(`Cannot add neurons to ${layer.layerType} layer`);
+            // Could show a tooltip or message to the user here
+            return;
+        }
+        
         // Generate new neuron ID
         const newNeuronId = `${layer.id}_n${layer.neurons.length + 1}`;
         
@@ -909,12 +1036,15 @@ class NeuralNetworkVis {
     }
     
     updateNetworkStructure(architecture) {
-        // Convert architecture to our internal format
+        // Clear existing layers
+        this.layers = [];
+        
+        // Create new layers based on architecture
         const newLayers = [];
         
         // Input layer
         const inputNeurons = [];
-        for (let i = 0; i < (architecture.inputShape || 2); i++) {
+        for (let i = 0; i < architecture.inputShape; i++) {
             inputNeurons.push({
                 id: `input_n${i+1}`,
                 value: `X${i+1}`
@@ -929,16 +1059,23 @@ class NeuralNetworkVis {
             regularization: 'none'
         });
         
-        // Hidden layers
-        if (architecture.layers && architecture.layers.length > 0) {
-            // Count how many hidden layers we have (all but the last one which is output)
-            const hiddenLayerCount = architecture.layers.length - 1;
-            
-            for (let i = 0; i < hiddenLayerCount; i++) {
+        // Hidden and output layers
+        if (architecture.layers && architecture.layers.length) {
+            // Add all layers except the last one as hidden layers
+            for (let i = 0; i < architecture.layers.length - 1; i++) {
                 const layer = architecture.layers[i];
                 const neurons = [];
                 
-                for (let j = 0; j < (layer.units || 2); j++) {
+                // Number of units depends on layer type
+                let numUnits = layer.units || 2;
+                
+                // For Dropout layers, we still visualize it with a unit
+                // But in reality Dropout doesn't have "units" parameter
+                if (layer.type === 'Dropout') {
+                    numUnits = 1;
+                }
+                
+                for (let j = 0; j < numUnits; j++) {
                     neurons.push({
                         id: `hidden${i+1}_n${j+1}`,
                         value: ''
@@ -948,6 +1085,7 @@ class NeuralNetworkVis {
                 newLayers.push({
                     id: `hidden${i+1}`,
                     type: 'hidden',
+                    layerType: layer.type || 'Dense',
                     neurons: neurons,
                     activationFn: layer.activation || 'relu',
                     regularization: layer.regularization || 'none'
@@ -968,6 +1106,7 @@ class NeuralNetworkVis {
             newLayers.push({
                 id: 'output',
                 type: 'output',
+                layerType: 'Dense', // Output layer is always Dense
                 neurons: outputNeurons,
                 activationFn: outputLayer.activation || 'softmax',
                 regularization: outputLayer.regularization || 'none'
@@ -977,6 +1116,7 @@ class NeuralNetworkVis {
             newLayers.push({
                 id: 'output',
                 type: 'output',
+                layerType: 'Dense',
                 neurons: [{
                     id: 'output_n1',
                     value: 'Y'
@@ -1048,11 +1188,21 @@ class NeuralNetworkVis {
             const activation = layer.activationFn || 
                              (layer.type === 'output' ? 'linear' : 'relu');
             
+            // Use the explicitly set layer type, or default to 'Dense'
+            const layerType = layer.layerType || 'Dense';
+            
             const layerConfig = {
-                type: 'Dense',
+                type: layerType,
                 units: neuronCount,
                 activation: activation
             };
+            
+            // Add dropout rate if it's a Dropout layer
+            if (layerType === 'Dropout') {
+                layerConfig.rate = 0.2; // Default dropout rate
+                delete layerConfig.units; // Units doesn't apply to Dropout
+                delete layerConfig.activation; // Activation doesn't apply to Dropout
+            }
             
             // Add regularization if it's not 'none'
             if (layer.regularization && layer.regularization !== 'none') {
@@ -1061,7 +1211,7 @@ class NeuralNetworkVis {
             
             architecture.layers.push(layerConfig);
             
-            console.log(`Layer ${i} (${layer.type}): ${neuronCount} neurons, activation: ${activation}`);
+            console.log(`Layer ${i} (${layer.type}): Type: ${layerType}, ${neuronCount} neurons, activation: ${activation}`);
         }
         
         // Debug the final architecture

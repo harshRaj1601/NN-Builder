@@ -97,6 +97,12 @@ class NeuralNetworkBuilder {
             backToTrainingBtn.addEventListener('click', () => this.goBackToTraining());
         }
         
+        // Back to results button
+        const backToResultsBtn = document.getElementById('backToResultsBtn');
+        if (backToResultsBtn) {
+            backToResultsBtn.addEventListener('click', () => this.goBackToResults());
+        }
+        
         // Start training
         if (this.elements.startTrainingBtn) {
             this.elements.startTrainingBtn.addEventListener('click', () => this.startTraining());
@@ -307,6 +313,11 @@ class NeuralNetworkBuilder {
         formData.append('file', this.state.currentFile);
         formData.append('target_column', this.state.targetColumn);
         
+        // Get selected dataset type (classification or regression)
+        const datasetType = document.querySelector('input[name="datasetType"]:checked').value;
+        formData.append('dataset_type', datasetType);
+        console.log("Selected dataset type:", datasetType);
+        
         // Add detected delimiter if available
         if (this.state.csvDelimiter) {
             formData.append('delimiter', this.state.csvDelimiter);
@@ -368,6 +379,18 @@ class NeuralNetworkBuilder {
                     onNeuronRemove: (neuron) => {
                         console.log('Neuron removed', neuron);
                         this.updateArchitectureFromVisualization();
+                    },
+                    onActivationChange: (layerId, activation) => {
+                        console.log('Activation changed', layerId, activation);
+                        this.updateArchitectureFromVisualization();
+                    },
+                    onRegularizationChange: (layerId, regularization) => {
+                        console.log('Regularization changed', layerId, regularization);
+                        this.updateArchitectureFromVisualization();
+                    },
+                    onLayerTypeChange: (layerId, layerType) => {
+                        console.log('Layer type changed', layerId, layerType);
+                        this.updateArchitectureFromVisualization();
                     }
                 });
                 
@@ -424,12 +447,27 @@ class NeuralNetworkBuilder {
                     input_shape: architectureClone.inputShape,
                     layers: architectureClone.layers.map(layer => {
                         // Convert from visualization format to server format if needed
-                        return {
+                        const baseLayer = {
                             type: layer.type || 'Dense', // Default to Dense if not specified
-                            units: layer.units,
-                            activation: layer.activation,
                             regularization: layer.regularization || undefined
                         };
+                        
+                        // Add type-specific properties
+                        if (layer.type === 'Dropout') {
+                            return {
+                                ...baseLayer,
+                                rate: layer.rate || 0.2
+                            };
+                        } else if (layer.type === 'BatchNormalization') {
+                            return baseLayer;
+                        } else {
+                            // For Dense, LSTM, GRU, etc. that need units and activation
+                            return {
+                                ...baseLayer,
+                                units: layer.units,
+                                activation: layer.activation
+                            };
+                        }
                     })
                 };
                 
@@ -508,12 +546,16 @@ class NeuralNetworkBuilder {
                     architecture: {
                         input_shape: visArchitecture.inputShape,
                         layers: visArchitecture.layers.map(layer => ({
-                            type: 'Dense',
+                            type: layer.type || 'Dense', // Use the layer type from visualization
                             units: layer.units,
                             activation: layer.activation,
-                            regularization: layer.regularization
+                            regularization: layer.regularization,
+                            // Add dropout rate for Dropout layers
+                            ...(layer.type === 'Dropout' && { rate: layer.rate || 0.2 })
                         }))
                     },
+                    // Include dataset type from state
+                    dataset_type: this.state.datasetInfo?.target_type || 'classification',
                     optimizer: optimizer,
                     learning_rate: learningRate
                 };
@@ -639,7 +681,48 @@ class NeuralNetworkBuilder {
         const testLoss = document.getElementById('testLoss');
         
         if (testAccuracy && this.state.trainingResults.testAccuracy !== null) {
-            testAccuracy.textContent = (this.state.trainingResults.testAccuracy * 100).toFixed(2) + '%';
+            // Fix accuracy value - ensure it's a value between 0-1 before converting to percentage
+            const accuracy = parseFloat(this.state.trainingResults.testAccuracy);
+            
+            // For regression tasks, show both transformed accuracy and raw error
+            if (this.state.trainingResults.isRegression) {
+                // Display the transformed accuracy value (0-1 scale where 1 is best)
+                const displayValue = (accuracy * 100).toFixed(2);
+                testAccuracy.textContent = displayValue + '%';
+                
+                // Change label to indicate this is a model quality score
+                const label = testAccuracy.closest('.metric-card')?.querySelector('.metric-label');
+                if (label) {
+                    label.textContent = 'Model Quality';
+                }
+                
+                // Add raw MAE display if available
+                if (this.state.trainingResults.test_mae_raw !== undefined) {
+                    const rawMae = parseFloat(this.state.trainingResults.test_mae_raw);
+                    // Create or update MAE display
+                    let maeElement = document.getElementById('testMae');
+                    if (!maeElement) {
+                        // Create a new metric card for MAE
+                        const metricsContainer = testAccuracy.closest('.metrics-container');
+                        if (metricsContainer) {
+                            const maeCard = document.createElement('div');
+                            maeCard.className = 'metric-card';
+                            maeCard.innerHTML = `
+                                <div class="metric-value" id="testMae">${rawMae.toFixed(4)}</div>
+                                <div class="metric-label">Mean Absolute Error</div>
+                                <div class="metric-description">Lower values indicate better predictions</div>
+                            `;
+                            metricsContainer.appendChild(maeCard);
+                        }
+                    } else {
+                        maeElement.textContent = rawMae.toFixed(4);
+                    }
+                }
+            } else {
+                // For classification, show as percentage
+                const displayValue = accuracy > 1 ? accuracy.toFixed(2) : (accuracy * 100).toFixed(2);
+                testAccuracy.textContent = displayValue + '%';
+            }
         }
         
         if (testLoss && this.state.trainingResults.testLoss !== null) {
@@ -962,7 +1045,21 @@ class NeuralNetworkBuilder {
                     const testLoss = document.getElementById('testLoss');
                     
                     if (testAccuracy) {
-                        testAccuracy.textContent = (data.test_accuracy * 100).toFixed(2) + '%';
+                        // Fix accuracy value - ensure it's a value between 0-1 before converting to percentage
+                        const accuracy = parseFloat(data.test_accuracy);
+                        
+                        // For regression tasks, show the raw error value
+                        if (data.is_regression === true) {
+                            testAccuracy.textContent = accuracy.toFixed(4);
+                            // Change label if possible
+                            const label = testAccuracy.closest('.metric-card')?.querySelector('.metric-label');
+                            if (label) {
+                                label.textContent = 'Test Error';
+                            }
+                        } else {
+                            // For classification, show as percentage
+                            testAccuracy.textContent = (accuracy * 100).toFixed(2) + '%';
+                        }
                     }
                     
                     if (testLoss) {
@@ -972,7 +1069,9 @@ class NeuralNetworkBuilder {
                     // Store the results
                     this.state.trainingResults = {
                         testAccuracy: data.test_accuracy,
-                        testLoss: data.test_loss
+                        testLoss: data.test_loss,
+                        isRegression: data.is_regression,
+                        test_mae_raw: data.test_mae_raw // Store the raw MAE value for regression tasks
                     };
                     
                     // Move to results step
@@ -1142,49 +1241,7 @@ class NeuralNetworkBuilder {
         }
     }
     
-    goBackToArchitecture() {
-        // Implement the logic to go back to the architecture stage
-        console.log("Going back to architecture stage");
-        
-        this.showLoading('Returning to architecture stage...');
-        
-        // Call the backend to reset training state if needed
-        axios.post('/go_back')
-            .then(response => {
-                if (response.data.success) {
-                    console.log('Successfully went back to architecture stage');
-                    
-                    // Reset any training-related state
-                    if (this.trainingInterval) {
-                        clearInterval(this.trainingInterval);
-                        this.trainingInterval = null;
-                    }
-                    
-                    // Reset training monitor if it exists
-                    if (window.trainingMonitor) {
-                        window.trainingMonitor.resetCharts();
-                    }
-                    
-                    // Update status text
-                    const trainingStatusText = document.getElementById('training-status-text');
-                    if (trainingStatusText) {
-                        trainingStatusText.textContent = 'Ready to train';
-                    }
-                    
-                    // Navigate back to the architecture step
-                    this.goToStep(2);
-                } else {
-                    this.showError(response.data.error || 'Failed to go back to architecture stage.');
-                }
-            })
-            .catch(error => {
-                console.error('Error going back to architecture stage:', error);
-                this.showError(`Error going back: ${error.message}`);
-            })
-            .finally(() => {
-                this.hideLoading();
-            });
-    }
+    // goBackToArchitecture function has been moved and enhanced below
     
     goBackToTraining() {
         // Implement the logic to go back to the training stage
@@ -1229,9 +1286,90 @@ class NeuralNetworkBuilder {
                 this.hideLoading();
             });
     }
+    
+    goBackToResults() {
+        // Implement the logic to go back to the results stage
+        console.log("Going back to results stage");
+        
+        this.showLoading('Returning to results stage...');
+        
+        // Hide code section
+        this.hideAllSections();
+        
+        // Check if training has occurred or if we came directly from architecture
+        if (this.state.trainingResults) {
+            // If we have training results, go back to results section
+            console.log("Going back to training results");
+            this.sections.trainingResultsSection.style.display = 'block';
+            this.updateActiveStep(4);
+        } else {
+            // If no training results, go back to architecture section
+            console.log("Going back to architecture (no training results)");
+            this.sections.architectureSection.style.display = 'block';
+            this.updateActiveStep(2);
+        }
+        
+        this.hideLoading();
+    }
+    
+    // Modified goBackToArchitecture to work from code section as well
+    goBackToArchitecture() {
+        // Implement the logic to go back to the architecture stage
+        console.log("Going back to architecture stage");
+        
+        this.showLoading('Returning to architecture stage...');
+        
+        // Check if we're in the code section
+        if (this.sections.codeSection.style.display !== 'none') {
+            // If we're in the code section, just go back to architecture directly
+            this.hideAllSections();
+            this.sections.architectureSection.style.display = 'block';
+            this.updateActiveStep(2);
+            this.hideLoading();
+            return;
+        }
+        
+        // Otherwise, proceed with the original implementation for going back from training
+        // Call the backend to reset training state if needed
+        axios.post('/go_back')
+            .then(response => {
+                if (response.data.success) {
+                    console.log('Successfully went back to architecture stage');
+                    
+                    // Reset any training-related state
+                    if (this.trainingInterval) {
+                        clearInterval(this.trainingInterval);
+                        this.trainingInterval = null;
+                    }
+                    
+                    // Reset training monitor if it exists
+                    if (window.trainingMonitor) {
+                        window.trainingMonitor.resetCharts();
+                    }
+                    
+                    // Update status text
+                    const trainingStatusText = document.getElementById('training-status-text');
+                    if (trainingStatusText) {
+                        trainingStatusText.textContent = 'Ready to train';
+                    }
+                    
+                    // Navigate back to the architecture step
+                    this.goToStep(2);
+                } else {
+                    this.showError(response.data.error || 'Failed to go back to architecture stage.');
+                }
+            })
+            .catch(error => {
+                console.error('Error going back to architecture stage:', error);
+                this.showError(`Error going back: ${error.message}`);
+            })
+            .finally(() => {
+                this.hideLoading();
+            });
+    }
 }
 
 // Initialize the application when document is loaded
 document.addEventListener('DOMContentLoaded', () => {
     window.app = new NeuralNetworkBuilder();
-}); 
+});

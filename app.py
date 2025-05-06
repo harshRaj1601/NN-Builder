@@ -41,6 +41,7 @@ label_encoder = LabelEncoder()
 training_config = None
 training_in_progress = False  # Track if training is already running
 stop_training_flag = False  # Track if user wants to stop training
+pause_training_flag = False  # Track if user wants to pause training
 
 @app.route('/')
 def index():
@@ -458,6 +459,23 @@ def train():
         logger.exception("Exception in train route.")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/pause_training', methods=['POST'])
+def pause_training():
+    """Endpoint to pause/resume training"""
+    global pause_training_flag
+    
+    # Toggle the pause flag
+    pause_training_flag = not pause_training_flag
+    
+    action = "paused" if pause_training_flag else "resumed"
+    logger.info(f"User requested to {action} training")
+    
+    return jsonify({
+        'success': True, 
+        'paused': pause_training_flag,
+        'message': f'Training {action}. It will {action} after the current batch completes.'
+    })
+
 @app.route('/stop_training', methods=['POST'])
 def stop_training():
     """Endpoint to stop training in infinite mode"""
@@ -601,6 +619,20 @@ def train_stream():
                     if stop_training_flag:
                         logger.info("Stopping training as requested by user")
                         self.model.stop_training = True
+                
+                def on_batch_end(self, batch, logs=None):
+                    # Check if training should be paused
+                    global pause_training_flag
+                    while pause_training_flag and not stop_training_flag:
+                        # Sleep briefly to avoid CPU spinning
+                        import time
+                        time.sleep(0.1)
+                        
+                        # If stop flag is set while paused, exit the pause loop
+                        if stop_training_flag:
+                            logger.info("Stopping training while paused as requested by user")
+                            self.model.stop_training = True
+                            break
 
             # Train model with callbacks
             model_callback = StreamCallback()

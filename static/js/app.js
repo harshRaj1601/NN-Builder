@@ -11,6 +11,7 @@ class NeuralNetworkBuilder {
             modelSummary: '',
             trainingResults: null,
             isTraining: false,
+            isPaused: false,
             codeGenerated: false,
             generatedCode: '',
             csvDelimiter: null,
@@ -45,6 +46,7 @@ class NeuralNetworkBuilder {
             buildModelBtn: document.getElementById('buildModelBtn'),
             directCodeBtn: document.getElementById('directCodeBtn'),
             startTrainingBtn: document.getElementById('startTrainingBtn'),
+            pauseTrainingBtn: document.getElementById('pauseTrainingBtn'),
             downloadBtn: document.getElementById('downloadBtn'),
             generateCodeBtn: document.getElementById('generateCodeBtn'),
             copyCodeBtn: document.getElementById('copyCodeBtn'),
@@ -55,6 +57,15 @@ class NeuralNetworkBuilder {
             trainTestSplit: document.getElementById('trainTestSplit'),
             loadingOverlay: document.getElementById('loadingOverlay'),
             loadingText: document.getElementById('loadingText')
+        };
+        
+        // Training metrics storage
+        this.trainingMetrics = {
+            epochs: [],
+            accuracy: [],
+            loss: [],
+            val_accuracy: [],
+            val_loss: []
         };
         
         // Initialize components
@@ -108,6 +119,11 @@ class NeuralNetworkBuilder {
             this.elements.startTrainingBtn.addEventListener('click', () => this.startTraining());
         }
         
+        // Pause training
+        if (this.elements.pauseTrainingBtn) {
+            this.elements.pauseTrainingBtn.addEventListener('click', () => this.pauseTraining());
+        }
+        
         // Download model
         if (this.elements.downloadBtn) {
             this.elements.downloadBtn.addEventListener('click', () => this.downloadModel());
@@ -121,6 +137,12 @@ class NeuralNetworkBuilder {
         // Copy code button
         if (this.elements.copyCodeBtn) {
             this.elements.copyCodeBtn.addEventListener('click', () => this.copyGeneratedCode());
+        }
+        
+        // Expand metrics button
+        const expandMetricsBtn = document.getElementById('expandMetricsBtn');
+        if (expandMetricsBtn) {
+            expandMetricsBtn.addEventListener('click', () => this.toggleExpandedMetrics());
         }
     }
     
@@ -623,16 +645,33 @@ class NeuralNetworkBuilder {
         try {
             this.showLoading('Initializing training...');
             
+            // Reset training metrics storage
+            this.trainingMetrics = {
+                epochs: [],
+                accuracy: [],
+                loss: [],
+                val_accuracy: [],
+                val_loss: []
+            };
+            
             // Initialize training monitor if not already initialized
             if (!window.trainingMonitor) {
                 window.trainingMonitor = initTrainingMonitor({
                     onEpochEnd: (data) => {
                         console.log('Epoch end callback:', data);
+                        // Store metrics for later display
+                        this.trainingMetrics.epochs.push(data.epoch);
+                        this.trainingMetrics.accuracy.push(data.accuracy);
+                        this.trainingMetrics.loss.push(data.loss);
+                        this.trainingMetrics.val_accuracy.push(data.val_accuracy);
+                        this.trainingMetrics.val_loss.push(data.val_loss);
                     }
                 });
             }
             
-            const epochs = parseInt(this.elements.epochs?.value || '10');
+            // Check if infinite epochs mode is enabled
+            const infiniteEpochsEnabled = document.getElementById('infiniteEpochs')?.checked || false;
+            const epochs = infiniteEpochsEnabled ? 9999 : parseInt(this.elements.epochs?.value || '10');
             const batchSize = parseInt(this.elements.batchSize?.value || '32');
             const trainTestSplit = parseInt(this.elements.trainTestSplit?.value || '80') / 100; // Convert percentage to decimal
             
@@ -642,7 +681,8 @@ class NeuralNetworkBuilder {
                 learning_rate: parseFloat(this.elements.learningRate.value),
                 batch_size: batchSize,
                 epochs: epochs,
-                test_size: 1 - trainTestSplit // Convert train percentage to test percentage (1 - train)
+                test_size: 1 - trainTestSplit, // Convert train percentage to test percentage (1 - train)
+                infinite_training: infiniteEpochsEnabled
             };
             
             // Send training request to server
@@ -659,8 +699,18 @@ class NeuralNetworkBuilder {
                 // Update status text to indicate training has started
                 const trainingStatusText = document.getElementById('training-status-text');
                 if (trainingStatusText) {
-                    trainingStatusText.textContent = 'Training started. Watch progress in charts below...';
+                    trainingStatusText.textContent = infiniteEpochsEnabled ? 
+                        'Training in infinite mode. Use pause button when satisfied.' : 
+                        'Training started. Watch progress in charts below...';
                 }
+                
+                // Show pause button and hide start button during training
+                if (this.elements.startTrainingBtn) this.elements.startTrainingBtn.style.display = 'none';
+                if (this.elements.pauseTrainingBtn) this.elements.pauseTrainingBtn.style.display = 'block';
+                
+                // Set training state
+                this.state.isTraining = true;
+                this.state.isPaused = false;
                 
                 // Start polling for training updates
                 this.trainingInterval = setInterval(() => this.checkTrainingStatus(), 1000);
@@ -672,6 +722,142 @@ class NeuralNetworkBuilder {
             this.hideLoading();
             this.showError('Error starting training: ' + error.message);
         }
+    }
+    
+    async pauseTraining() {
+        try {
+            const trainingStatusText = document.getElementById('training-status-text');
+            
+            // Send pause/resume request to server
+            const response = await axios.post('/pause_training');
+            
+            if (response.data.success) {
+                // Update UI based on paused state
+                this.state.isPaused = response.data.paused;
+                
+                if (this.elements.pauseTrainingBtn) {
+                    // Update button text and icon based on state
+                    if (this.state.isPaused) {
+                        this.elements.pauseTrainingBtn.innerHTML = '<i class="fas fa-play me-2"></i>Resume Training';
+                        if (trainingStatusText) {
+                            trainingStatusText.textContent = 'Training paused. Click Resume to continue.';
+                        }
+                    } else {
+                        this.elements.pauseTrainingBtn.innerHTML = '<i class="fas fa-pause me-2"></i>Pause Training';
+                        if (trainingStatusText) {
+                            trainingStatusText.textContent = 'Training resumed. Watch progress in charts below...';
+                        }
+                    }
+                }
+            } else {
+                this.showError(response.data.error || 'Failed to pause/resume training.');
+            }
+        } catch (error) {
+            this.showError('Error pausing/resuming training: ' + error.message);
+        }
+    }
+    
+    // Display all training metrics in the results section
+    displayAllMetrics() {
+        // Check if we have training metrics to display
+        if (!this.trainingMetrics || this.trainingMetrics.epochs.length === 0) {
+            console.log('No training metrics to display');
+            return;
+        }
+        
+        // Get the metrics container
+        const metricsContainer = document.getElementById('all-metrics-container');
+        if (!metricsContainer) {
+            console.error('Metrics container not found');
+            // Create the container if it doesn't exist
+            const resultsSection = document.querySelector('#trainingResultsSection .card-body');
+            if (resultsSection) {
+                const metricsSection = document.createElement('div');
+                metricsSection.className = 'mt-4';
+                metricsSection.innerHTML = `
+                    <h6 class="mb-3"><i class="fas fa-chart-line me-2"></i>Training Metrics</h6>
+                    <div id="all-metrics-container"></div>
+                    <button id="expandMetricsBtn" class="btn btn-sm btn-outline-primary mt-2" style="display: none;">
+                        Show All Epochs
+                    </button>
+                `;
+                resultsSection.appendChild(metricsSection);
+                
+                // Add event listener to the expand button
+                const expandBtn = metricsSection.querySelector('#expandMetricsBtn');
+                if (expandBtn) {
+                    expandBtn.addEventListener('click', () => this.toggleExpandedMetrics());
+                }
+                
+                // Now get the container we just created
+                return this.displayAllMetrics();
+            }
+            return;
+        }
+        
+        // Clear previous content
+        metricsContainer.innerHTML = '';
+        
+        // Create a summary table for the metrics
+        const table = document.createElement('table');
+        table.className = 'table table-sm table-hover metrics-table';
+        
+        // Create table header
+        const thead = document.createElement('thead');
+        thead.innerHTML = `
+            <tr>
+                <th>Epoch</th>
+                <th>Training Loss</th>
+                <th>Training Accuracy</th>
+                <th>Validation Loss</th>
+                <th>Validation Accuracy</th>
+            </tr>
+        `;
+        table.appendChild(thead);
+        
+        // Create table body
+        const tbody = document.createElement('tbody');
+        
+        // Add rows for each epoch (limited to first 5 in collapsed view)
+        const displayCount = this.expandedMetricsView ? this.trainingMetrics.epochs.length : Math.min(5, this.trainingMetrics.epochs.length);
+        
+        for (let i = 0; i < displayCount; i++) {
+            const row = document.createElement('tr');
+            
+            // Format values to 4 decimal places
+            const accuracy = this.trainingMetrics.accuracy[i] * 100;
+            const valAccuracy = this.trainingMetrics.val_accuracy[i] * 100;
+            
+            row.innerHTML = `
+                <td>${this.trainingMetrics.epochs[i] + 1}</td>
+                <td>${this.trainingMetrics.loss[i].toFixed(4)}</td>
+                <td>${accuracy.toFixed(2)}%</td>
+                <td>${this.trainingMetrics.val_loss[i].toFixed(4)}</td>
+                <td>${valAccuracy.toFixed(2)}%</td>
+            `;
+            
+            tbody.appendChild(row);
+        }
+        
+        table.appendChild(tbody);
+        metricsContainer.appendChild(table);
+        
+        // Show/hide expand button based on number of epochs
+        const expandBtn = document.getElementById('expandMetricsBtn');
+        if (expandBtn) {
+            if (this.trainingMetrics.epochs.length > 5) {
+                expandBtn.style.display = 'block';
+                expandBtn.textContent = this.expandedMetricsView ? 'Show Less' : 'Show All Epochs';
+            } else {
+                expandBtn.style.display = 'none';
+            }
+        }
+    }
+    
+    // Toggle between expanded and collapsed metrics view
+    toggleExpandedMetrics() {
+        this.expandedMetricsView = !this.expandedMetricsView;
+        this.displayAllMetrics();
     }
     
     updateTestMetrics() {
@@ -1016,7 +1202,13 @@ class NeuralNetworkBuilder {
                     
                     // Update status text without showing loading overlay
                     if (trainingStatusText) {
-                        trainingStatusText.textContent = `Training in progress... Epoch ${data.epoch + 1}/${this.elements.epochs.value}`;
+                        // Check if infinite epochs mode is enabled
+                        const infiniteEpochsEnabled = document.getElementById('infiniteEpochs')?.checked || false;
+                        if (infiniteEpochsEnabled) {
+                            trainingStatusText.textContent = `Training in progress... Epoch ${data.epoch + 1} (Infinite mode)`;
+                        } else {
+                            trainingStatusText.textContent = `Training in progress... Epoch ${data.epoch + 1}/${this.elements.epochs.value}`;
+                        }
                     }
                     
                     // Make sure loading overlay is hidden during training
@@ -1028,6 +1220,14 @@ class NeuralNetworkBuilder {
                     this.hideLoading();
                     if (trainingStatusText) {
                         trainingStatusText.textContent = 'Training completed!';
+                    }
+                    
+                    // Reset UI elements
+                    if (this.elements.startTrainingBtn) this.elements.startTrainingBtn.style.display = 'block';
+                    if (this.elements.pauseTrainingBtn) {
+                        this.elements.pauseTrainingBtn.style.display = 'none';
+                        // Reset pause button text
+                        this.elements.pauseTrainingBtn.innerHTML = '<i class="fas fa-pause me-2"></i>Pause Training';
                     }
                     
                     // Clear the interval
@@ -1071,8 +1271,16 @@ class NeuralNetworkBuilder {
                         testAccuracy: data.test_accuracy,
                         testLoss: data.test_loss,
                         isRegression: data.is_regression,
-                        test_mae_raw: data.test_mae_raw // Store the raw MAE value for regression tasks
+                        test_mae_raw: data.test_mae_raw, // Store the raw MAE value for regression tasks
+                        trainingMetrics: this.trainingMetrics // Store all training metrics
                     };
+                    
+                    // Display all metrics in the results section
+                    this.displayAllMetrics();
+                    
+                    // Reset training state
+                    this.state.isTraining = false;
+                    this.state.isPaused = false;
                     
                     // Move to results step
                     this.goToStep(4);
@@ -1085,6 +1293,14 @@ class NeuralNetworkBuilder {
                     // Error occurred during training
                     this.hideLoading();
                     this.showError(`Error during training: ${data.message}`);
+                    
+                    // Reset UI elements
+                    if (this.elements.startTrainingBtn) this.elements.startTrainingBtn.style.display = 'block';
+                    if (this.elements.pauseTrainingBtn) this.elements.pauseTrainingBtn.style.display = 'none';
+                    
+                    // Reset training state
+                    this.state.isTraining = false;
+                    this.state.isPaused = false;
                     
                     // Clear the interval
                     clearInterval(this.trainingInterval);
@@ -1102,6 +1318,14 @@ class NeuralNetworkBuilder {
                 console.error('EventSource error:', error);
                 this.hideLoading();
                 this.showError('Connection to training stream lost.');
+                
+                // Reset UI elements
+                if (this.elements.startTrainingBtn) this.elements.startTrainingBtn.style.display = 'block';
+                if (this.elements.pauseTrainingBtn) this.elements.pauseTrainingBtn.style.display = 'none';
+                
+                // Reset training state
+                this.state.isTraining = false;
+                this.state.isPaused = false;
                 
                 // Clear the interval
                 clearInterval(this.trainingInterval);

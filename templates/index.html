@@ -21,6 +21,9 @@
     <!-- Custom Dark Theme CSS -->
     <link href="/static/css/dark-theme.css" rel="stylesheet">
     
+    <!-- Custom Metrics CSS -->
+    <link href="/static/css/metrics.css" rel="stylesheet">
+    
     <!-- D3.js -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
     
@@ -256,6 +259,12 @@
                             <div class="range-slider">
                                 <input type="range" class="form-range" id="epochs" min="1" max="100" value="20" oninput="document.getElementById('epochsValue').textContent = this.value">
                             </div>
+                            <div class="form-check mt-2">
+                                <input class="form-check-input" type="checkbox" id="infiniteEpochs">
+                                <label class="form-check-label" for="infiniteEpochs">
+                                    Infinite epochs mode
+                                </label>
+                            </div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Batch Size <span id="batchSizeValue">32</span></label>
@@ -276,6 +285,9 @@
                         </button>
                         <button class="btn btn-primary flex-grow-1" id="startTrainingBtn">
                             <i class="fas fa-play me-2"></i>Start Training
+                        </button>
+                        <button class="btn btn-warning ms-2" id="pauseTrainingBtn" style="display: none;">
+                            <i class="fas fa-pause me-2"></i>Pause Training
                         </button>
                     </div>
                 </div>

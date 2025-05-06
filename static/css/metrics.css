@@ -1,0 +1,47 @@
+/* Training metrics table */
+.metrics-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+    margin-bottom: 15px;
+    background-color: white;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.metrics-table th {
+    background-color: #f1f3f5;
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    color: #495057;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.metrics-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #e9ecef;
+    color: #212529;
+}
+
+.metrics-table tbody tr:hover {
+    background-color: #f8f9fa;
+}
+
+.metrics-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+/* Expand button */
+#expandMetricsBtn {
+    margin-top: 10px;
+    font-size: 14px;
+}
+
+/* Metrics container */
+#all-metrics-container {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-bottom: 10px;
+}

@@ -4,29 +4,29 @@
     border-collapse: collapse;
     font-size: 14px;
     margin-bottom: 15px;
-    background-color: white;
+    background-color: var(--dark-surface-2);
     border-radius: 6px;
     overflow: hidden;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
 }
 
 .metrics-table th {
-    background-color: #f1f3f5;
+    background-color: var(--dark-surface-3);
     padding: 8px 12px;
     text-align: left;
     font-weight: 600;
-    color: #495057;
-    border-bottom: 1px solid #dee2e6;
+    color: var(--dark-text);
+    border-bottom: 1px solid var(--dark-border);
 }
 
 .metrics-table td {
     padding: 8px 12px;
-    border-bottom: 1px solid #e9ecef;
-    color: #212529;
+    border-bottom: 1px solid var(--dark-border);
+    color: var(--dark-text);
 }
 
 .metrics-table tbody tr:hover {
-    background-color: #f8f9fa;
+    background-color: var(--dark-surface);
 }
 
 .metrics-table tbody tr:last-child td {

@@ -704,9 +704,14 @@ class NeuralNetworkBuilder {
                         'Training started. Watch progress in charts below...';
                 }
                 
-                // Show pause button and hide start button during training
-                if (this.elements.startTrainingBtn) this.elements.startTrainingBtn.style.display = 'none';
-                if (this.elements.pauseTrainingBtn) this.elements.pauseTrainingBtn.style.display = 'block';
+                // Show both buttons during training, with start button disabled
+                if (this.elements.startTrainingBtn) {
+                    this.elements.startTrainingBtn.style.display = 'block';
+                    this.elements.startTrainingBtn.disabled = true;
+                }
+                if (this.elements.pauseTrainingBtn) {
+                    this.elements.pauseTrainingBtn.style.display = 'block';
+                }
                 
                 // Set training state
                 this.state.isTraining = true;
@@ -1223,7 +1228,10 @@ class NeuralNetworkBuilder {
                     }
                     
                     // Reset UI elements
-                    if (this.elements.startTrainingBtn) this.elements.startTrainingBtn.style.display = 'block';
+                    if (this.elements.startTrainingBtn) {
+                        this.elements.startTrainingBtn.style.display = 'block';
+                        this.elements.startTrainingBtn.disabled = false;
+                    }
                     if (this.elements.pauseTrainingBtn) {
                         this.elements.pauseTrainingBtn.style.display = 'none';
                         // Reset pause button text

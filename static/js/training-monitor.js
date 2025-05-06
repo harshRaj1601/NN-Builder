@@ -504,6 +504,26 @@ class TrainingMonitor {
                 <div class="metric-label">Validation Loss</div>
             </div>`;
             
+        // Add test metrics at the top if available
+        if (metrics.testLoss !== undefined && metrics.testAccuracy !== undefined) {
+            const testLoss = parseFloat(metrics.testLoss) || 0;
+            const testAcc = parseFloat(metrics.testAccuracy) || 0;
+            
+            // Update the global test metrics elements if they exist
+            const testLossElement = document.getElementById('testLoss');
+            const testAccuracyElement = document.getElementById('testAccuracy');
+            
+            if (testLossElement) {
+                testLossElement.textContent = testLoss.toFixed(4);
+            }
+            
+            if (testAccuracyElement) {
+                testAccuracyElement.textContent = isRegression ? 
+                    (testAcc * 100).toFixed(2) + '%' : 
+                    (testAcc * 100).toFixed(2) + '%';
+            }
+        }
+            
         // Add task-specific metrics
         if (isRegression) {
             // For regression, we show error metrics (MAE)
@@ -522,11 +542,11 @@ class TrainingMonitor {
             // For classification, we show accuracy percentages
             html += `
             <div class="metric-card">
-                <div class="metric-value">${(trainAcc * 100).toFixed(2)}%</div>
+                <div class="metric-value">${isNaN(trainAcc) ? "0.00%" : (trainAcc * 100).toFixed(2) + "%"}</div>
                 <div class="metric-label">Training Accuracy</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">${(valAcc * 100).toFixed(2)}%</div>
+                <div class="metric-value">${isNaN(valAcc) ? "0.00%" : (valAcc * 100).toFixed(2) + "%"}</div>
                 <div class="metric-label">Validation Accuracy</div>
             </div>`;
         }
@@ -566,11 +586,11 @@ class TrainingMonitor {
                 // For classification, show standard metrics
                 html += `
                 <div class="metric-card">
-                    <div class="metric-value">${testLoss.toFixed(4)}</div>
+                    <div class="metric-value">${isNaN(testLoss) ? "0.0000" : testLoss.toFixed(4)}</div>
                     <div class="metric-label">Test Loss</div>
                 </div>
                 <div class="metric-card">
-                    <div class="metric-value">${(testAcc * 100).toFixed(2)}%</div>
+                    <div class="metric-value">${isNaN(testAcc) ? "0.00%" : (testAcc * 100).toFixed(2) + "%"}</div>
                     <div class="metric-label">Test Accuracy</div>
                 </div>`;
             }

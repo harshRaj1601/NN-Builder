@@ -1,8 +1,8 @@
-tensorflow>=2.13.0
-flask>=2.0.0
-numpy>=1.24.0
-pandas>=2.0.0
-scikit-learn>=1.3.0
-matplotlib>=3.7.0
-python-dotenv>=1.0.0
-google-generativeai>=0.3.0
+tensorflow
+flask
+numpy
+pandas
+scikit-learn
+matplotlib
+python-dotenv
+google-generativeai

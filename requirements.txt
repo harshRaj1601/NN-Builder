@@ -5,4 +5,8 @@ pandas
 scikit-learn
 matplotlib
 python-dotenv
+<<<<<<< HEAD
 google-generativeai
+=======
+google-generativeai
+>>>>>>> 44052229460bd9b04045f0ffb6ceae35bc325de3

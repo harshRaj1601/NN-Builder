@@ -565,6 +565,13 @@ body {
     transform: none !important;
 }
 
+/* Ensure zoom buttons have stable positioning */
+.zoom-button {
+    position: relative;
+    display: block;
+    margin-bottom: 8px;
+}
+
 /* Connection and Layer Group Optimizations */
 .connections-group {
     will-change: transform;
@@ -777,6 +784,7 @@ body {
     min-width: 120px;
     text-align: center;
     border: 1px solid var(--dark-border);
+    box-shadow: var(--shadow-sm);
 }
 
 .metric-value {
@@ -789,6 +797,17 @@ body {
 .metric-label {
     font-size: var(--font-size-sm);
     color: var(--dark-text-secondary);
+}
+
+.metric-description {
+    font-size: var(--font-size-xs);
+    color: var(--dark-text-disabled);
+    margin-top: var(--spacing-xs);
+}
+
+/* Training controls styling */
+#startTrainingBtn, #pauseTrainingBtn {
+    transition: var(--transition-normal);
 }
 
 .training-charts {
@@ -864,6 +883,29 @@ body {
     margin-top: var(--spacing-lg);
     display: none;
     border: 1px solid var(--dark-border);
+    animation: fade-in 0.3s ease-out forwards;
+}
+
+.prediction-metric {
+    background-color: var(--dark-surface-2);
+    border-radius: var(--border-radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
+    text-align: center;
+    border: 1px solid var(--dark-border);
+}
+
+.prediction-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--spacing-md);
+    margin-top: var(--spacing-lg);
+}
+
+.prediction-error {
+    color: var(--error-color);
+    text-align: center;
+    padding: var(--spacing-md);
 }
 
 .prediction-value {
@@ -1068,4 +1110,4 @@ body {
     color: #7566f9;
     margin-left: 8px;
     transition: all 0.3s;
-} 
+}

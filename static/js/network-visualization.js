@@ -137,12 +137,30 @@ class NeuralNetworkVis {
         const zoomOutButton = this.svg.select('.zoom-out');
         
         // Disable zoom in button if at max zoom
-        zoomInButton.style('opacity', this.currentZoom >= 4 ? 0.5 : 1)
-                    .style('pointer-events', this.currentZoom >= 4 ? 'none' : 'all');
+        if (this.currentZoom >= 4) {
+            zoomInButton.style('opacity', 0.5)
+                        .style('pointer-events', 'none')
+                        .style('cursor', 'default');
+            zoomInButton.select('.zoom-button-bg')
+                        .attr('fill', 'rgba(45, 45, 55, 0.7)');
+        } else {
+            zoomInButton.style('opacity', 1)
+                        .style('pointer-events', 'all')
+                        .style('cursor', 'pointer');
+        }
                     
         // Disable zoom out button if at min zoom
-        zoomOutButton.style('opacity', this.currentZoom <= 0.1 ? 0.5 : 1)
-                     .style('pointer-events', this.currentZoom <= 0.1 ? 'none' : 'all');
+        if (this.currentZoom <= 0.1) {
+            zoomOutButton.style('opacity', 0.5)
+                         .style('pointer-events', 'none')
+                         .style('cursor', 'default');
+            zoomOutButton.select('.zoom-button-bg')
+                         .attr('fill', 'rgba(45, 45, 55, 0.7)');
+        } else {
+            zoomOutButton.style('opacity', 1)
+                         .style('pointer-events', 'all')
+                         .style('cursor', 'pointer');
+        }
     }
     
     // Zoom in by a factor
@@ -199,7 +217,7 @@ class NeuralNetworkVis {
                 
             // Update zoom controls position
             this.svg.select('.zoom-controls-container')
-                .attr('transform', `translate(${this.config.width - 60}, 20)`);
+                .attr('transform', `translate(${this.config.width - 120}, 20)`);
                 
             // Request render using RAF for performance
             this.requestRender();
@@ -1239,16 +1257,25 @@ class NeuralNetworkVis {
         // Create a fixed container positioned at the top-right
         const controlsContainer = this.svg.append('g')
             .attr('class', 'zoom-controls-container')
-            .attr('transform', `translate(${this.config.width - 60}, 20)`)
+            .attr('transform', `translate(${this.config.width - 120}, 20)`)
             .style('pointer-events', 'none');
         
         const controlGroup = controlsContainer.append('g')
             .attr('class', 'zoom-controls')
             .style('pointer-events', 'all');
         
-        // Create the zoom in button
+        // Create a background for the control panel to prevent event leakage
+        controlGroup.append('rect')
+            .attr('x', -20)
+            .attr('y', -20)
+            .attr('width', 140)
+            .attr('height', 40)
+            .attr('fill', 'transparent')
+            .attr('pointer-events', 'all');
+        
+        // Create the zoom in button - positioned horizontally
         const zoomInButton = controlGroup.append('g')
-            .attr('class', 'zoom-button')
+            .attr('class', 'zoom-button zoom-in')
             .attr('transform', 'translate(0, 0)')
             .style('cursor', 'pointer');
             
@@ -1273,15 +1300,10 @@ class NeuralNetworkVis {
             .attr('pointer-events', 'none')
             .text('+');
             
-        zoomInButton.on('click', (event) => {
-            event.stopPropagation();
-            this.zoomIn();
-        });
-        
-        // Create the zoom out button
+        // Create the zoom out button - positioned horizontally
         const zoomOutButton = controlGroup.append('g')
-            .attr('class', 'zoom-button')
-            .attr('transform', 'translate(0, 40)')
+            .attr('class', 'zoom-button zoom-out')
+            .attr('transform', 'translate(40, 0)')  // Positioned 40px to the right
             .style('cursor', 'pointer');
             
         zoomOutButton.append('circle')
@@ -1305,15 +1327,10 @@ class NeuralNetworkVis {
             .attr('pointer-events', 'none')
             .text('−');
             
-        zoomOutButton.on('click', (event) => {
-            event.stopPropagation();
-            this.zoomOut();
-        });
-        
-        // Create the reset zoom button
+        // Create the reset zoom button - positioned horizontally
         const resetButton = controlGroup.append('g')
-            .attr('class', 'zoom-button')
-            .attr('transform', 'translate(0, 80)')
+            .attr('class', 'zoom-button zoom-reset')
+            .attr('transform', 'translate(80, 0)')  // Positioned 80px to the right
             .style('cursor', 'pointer');
             
         resetButton.append('circle')
@@ -1336,11 +1353,47 @@ class NeuralNetworkVis {
             .attr('font-weight', 'bold')
             .attr('pointer-events', 'none')
             .text('⟲');
-            
+        
+        // Add event listeners with improved handling to prevent glitching
+        zoomInButton.on('click', (event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            this.zoomIn();
+        });
+        
+        zoomOutButton.on('click', (event) => {
+            event.stopPropagation();
+            event.preventDefault();
+            this.zoomOut();
+        });
+        
         resetButton.on('click', (event) => {
             event.stopPropagation();
+            event.preventDefault();
             this.resetZoom();
         });
+        
+        // Add hover effects to improve visual feedback
+        const addHoverEffects = (button) => {
+            button.on('mouseenter', function() {
+                d3.select(this).select('.zoom-button-bg')
+                    .transition().duration(150)
+                    .attr('fill', 'rgba(60, 60, 70, 0.95)')
+                    .attr('stroke', '#ccc');
+            });
+            
+            button.on('mouseleave', function() {
+                d3.select(this).select('.zoom-button-bg')
+                    .transition().duration(150)
+                    .attr('fill', 'rgba(45, 45, 55, 0.95)')
+                    .attr('stroke', '#aaa');
+            });
+        };
+        
+        // Apply hover effects to all buttons
+        addHoverEffects(zoomInButton);
+        addHoverEffects(zoomOutButton);
+        addHoverEffects(resetButton);
     }
 }
 

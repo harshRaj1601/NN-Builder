@@ -203,7 +203,7 @@ class TrainingMonitor {
                             },
                             ticks: {
                                 callback: function(value) {
-                                    return (value * 100).toFixed(0) + '%';
+                                    return isNaN(value) ? "0%" : (value * 100).toFixed(0) + '%';
                                 }
                             }
                         }
@@ -264,6 +264,9 @@ class TrainingMonitor {
         // Update status text
         this.updateStatus('Training in progress...');
         
+        // Update training controls visibility
+        this.updateTrainingControls();
+        
         // Set up event source for server-sent events
         this.setupEventSource();
     }
@@ -275,6 +278,9 @@ class TrainingMonitor {
             this.eventSource = null;
         }
         this.updateStatus('Training stopped');
+        
+        // Update training controls visibility
+        this.updateTrainingControls();
     }
     
     setupEventSource() {
@@ -470,11 +476,19 @@ class TrainingMonitor {
         const metricsContainer = document.getElementById(this.config.metricsContainerId);
         if (!metricsContainer) return;
         
-        // Ensure all metric values are valid numbers
-        const trainAcc = parseFloat(metrics.trainAccuracy) || 0;
-        const valAcc = parseFloat(metrics.valAccuracy) || 0;
-        const trainLoss = parseFloat(metrics.trainLoss) || 0;
-        const valLoss = parseFloat(metrics.valLoss) || 0;
+        // Ensure all metric values are valid numbers and handle NaN values
+        const trainAcc = !isNaN(parseFloat(metrics.trainAccuracy)) ? parseFloat(metrics.trainAccuracy) : 0;
+        const valAcc = !isNaN(parseFloat(metrics.valAccuracy)) ? parseFloat(metrics.valAccuracy) : 0;
+        const trainLoss = !isNaN(parseFloat(metrics.trainLoss)) ? parseFloat(metrics.trainLoss) : 0;
+        const valLoss = !isNaN(parseFloat(metrics.valLoss)) ? parseFloat(metrics.valLoss) : 0;
+        
+        // Log the raw values for debugging
+        console.log("Raw metric values:", {
+            trainAccuracy: metrics.trainAccuracy,
+            valAccuracy: metrics.valAccuracy,
+            trainLoss: metrics.trainLoss,
+            valLoss: metrics.valLoss
+        });
         
         // Determine if we're dealing with a regression task
         // Only use the explicit flag from the backend
@@ -482,6 +496,13 @@ class TrainingMonitor {
         
         // Store the regression flag for other methods to use
         this.isRegression = isRegression;
+        
+        // Store the accuracy values for later use
+        if (metrics.currentEpoch > 0) {
+            // Only store if we're in an actual epoch (not initialization)
+            this.lastTrainAccuracy = trainAcc;
+            this.lastValAccuracy = valAcc;
+        }
         
         console.log("Formatting metrics for display:", {
             trainAcc, valAcc, trainLoss, valLoss, 
@@ -513,14 +534,62 @@ class TrainingMonitor {
             const testLossElement = document.getElementById('testLoss');
             const testAccuracyElement = document.getElementById('testAccuracy');
             
+            // Create a final accuracy summary section if it doesn't exist
+            const finalMetricsContainer = document.getElementById('final-metrics-container');
+            if (!finalMetricsContainer) {
+                // Create the container if it doesn't exist
+                const resultsSection = document.getElementById('trainingResultsSection');
+                if (resultsSection) {
+                    const metricsRow = resultsSection.querySelector('.row.mb-4');
+                    if (metricsRow) {
+                        metricsRow.innerHTML = `
+                            <div class="col-md-3">
+                                <div class="metric-card">
+                                    <div class="metric-value" id="testAccuracy">${isNaN(testAcc) ? "0.00%" : (testAcc * 100).toFixed(2) + "%"}</div>
+                                    <div class="metric-label">Test Accuracy</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="metric-card">
+                                    <div class="metric-value" id="testLoss">${isNaN(testLoss) ? "0.0000" : testLoss.toFixed(4)}</div>
+                                    <div class="metric-label">Test Loss</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="metric-card">
+                                    <div class="metric-value" id="finalTrainAccuracy">${isNaN(trainAcc) ? "0.00%" : (trainAcc * 100).toFixed(2) + "%"}</div>
+                                    <div class="metric-label">Final Train Accuracy</div>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <div class="metric-card">
+                                    <div class="metric-value" id="finalValAccuracy">${isNaN(valAcc) ? "0.00%" : (valAcc * 100).toFixed(2) + "%"}</div>
+                                    <div class="metric-label">Final Val Accuracy</div>
+                                </div>
+                            </div>
+                        `;
+                    }
+                }
+            } else {
+                // Update existing elements
+                const finalTrainAccElement = document.getElementById('finalTrainAccuracy');
+                const finalValAccElement = document.getElementById('finalValAccuracy');
+                
+                if (finalTrainAccElement) {
+                    finalTrainAccElement.textContent = isNaN(trainAcc) ? "0.00%" : (trainAcc * 100).toFixed(2) + "%";
+                }
+                
+                if (finalValAccElement) {
+                    finalValAccElement.textContent = isNaN(valAcc) ? "0.00%" : (valAcc * 100).toFixed(2) + "%";
+                }
+            }
+            
             if (testLossElement) {
-                testLossElement.textContent = testLoss.toFixed(4);
+                testLossElement.textContent = isNaN(testLoss) ? "0.0000" : testLoss.toFixed(4);
             }
             
             if (testAccuracyElement) {
-                testAccuracyElement.textContent = isRegression ? 
-                    (testAcc * 100).toFixed(2) + '%' : 
-                    (testAcc * 100).toFixed(2) + '%';
+                testAccuracyElement.textContent = isNaN(testAcc) ? "0.00%" : (testAcc * 100).toFixed(2) + "%";
             }
         }
             
@@ -529,12 +598,12 @@ class TrainingMonitor {
             // For regression, we show error metrics (MAE)
             html += `
             <div class="metric-card">
-                <div class="metric-value">${trainAcc.toFixed(4)}</div>
+                <div class="metric-value">${isNaN(trainAcc) ? "0.0000" : trainAcc.toFixed(4)}</div>
                 <div class="metric-label">Training MAE</div>
                 <div class="metric-description">Lower values indicate better predictions</div>
             </div>
             <div class="metric-card">
-                <div class="metric-value">${valAcc.toFixed(4)}</div>
+                <div class="metric-value">${isNaN(valAcc) ? "0.0000" : valAcc.toFixed(4)}</div>
                 <div class="metric-label">Validation MAE</div>
                 <div class="metric-description">Lower values indicate better predictions</div>
             </div>`;
@@ -550,6 +619,12 @@ class TrainingMonitor {
                 <div class="metric-label">Validation Accuracy</div>
             </div>`;
         }
+        
+        // Update the metrics container with the HTML
+        metricsContainer.innerHTML = html;
+        
+        // Ensure training controls are properly displayed
+        this.updateTrainingControls();
             
         // Add test metrics if available
         if (metrics.testLoss !== undefined && metrics.testAccuracy !== undefined) {
@@ -560,7 +635,7 @@ class TrainingMonitor {
                 // For regression, show the transformed accuracy as a quality score
                 html += `
                 <div class="metric-card">
-                    <div class="metric-value">${(testAcc * 100).toFixed(2)}%</div>
+                    <div class="metric-value">${isNaN(testAcc) ? "0.00%" : (testAcc * 100).toFixed(2) + "%"}</div>
                     <div class="metric-label">Model Quality</div>
                     <div class="metric-description">Higher values indicate better model performance</div>
                 </div>`;
@@ -570,7 +645,7 @@ class TrainingMonitor {
                     const rawMae = parseFloat(metrics.testMaeRaw) || 0;
                     html += `
                     <div class="metric-card">
-                        <div class="metric-value">${rawMae.toFixed(4)}</div>
+                        <div class="metric-value">${isNaN(rawMae) ? "0.0000" : rawMae.toFixed(4)}</div>
                         <div class="metric-label">Mean Absolute Error</div>
                         <div class="metric-description">Lower values indicate better predictions</div>
                     </div>`;
@@ -579,7 +654,7 @@ class TrainingMonitor {
                 // Also show test loss
                 html += `
                 <div class="metric-card">
-                    <div class="metric-value">${testLoss.toFixed(4)}</div>
+                    <div class="metric-value">${isNaN(testLoss) ? "0.0000" : testLoss.toFixed(4)}</div>
                     <div class="metric-label">Test Loss (MSE)</div>
                 </div>`;
             } else {
@@ -643,6 +718,32 @@ class TrainingMonitor {
             testLoss: this.testLoss,
             testAccuracy: this.testAccuracy
         };
+    }
+    
+    // Ensure training controls are properly displayed
+    updateTrainingControls() {
+        // Get references to the training control buttons
+        const startTrainingBtn = document.getElementById('startTrainingBtn');
+        const pauseTrainingBtn = document.getElementById('pauseTrainingBtn');
+        
+        if (!startTrainingBtn || !pauseTrainingBtn) return;
+        
+        // Check if infinite epochs mode is enabled
+        const infiniteEpochsEnabled = document.getElementById('infiniteEpochs')?.checked || false;
+        
+        if (this.isTraining) {
+            // During training, show both buttons but disable start button
+            startTrainingBtn.style.display = 'block';
+            startTrainingBtn.disabled = true;
+            
+            // Always show pause button during training, especially in infinite mode
+            pauseTrainingBtn.style.display = 'block';
+        } else {
+            // When not training, show start button enabled and hide pause button
+            startTrainingBtn.style.display = 'block';
+            startTrainingBtn.disabled = false;
+            pauseTrainingBtn.style.display = 'none';
+        }
     }
     
     resetCharts() {

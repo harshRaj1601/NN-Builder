@@ -105,13 +105,29 @@ class PredictionInterface {
             // Get all input values
             const inputData = this.getInputValues();
             
+            // Check if we have any features defined
+            if (!this.config.features || this.config.features.length === 0) {
+                throw new Error('No features available for prediction. Please train a model first.');
+            }
+            
+            // Validate that we have all required inputs
+            const missingInputs = this.config.features.filter(feature => 
+                this.inputValues[feature.name] === undefined || 
+                this.inputValues[feature.name] === '' ||
+                (typeof this.inputValues[feature.name] === 'number' && isNaN(this.inputValues[feature.name]))
+            );
+            
+            if (missingInputs.length > 0) {
+                throw new Error(`Missing required inputs: ${missingInputs.map(f => f.label || f.name).join(', ')}`);
+            }
+            
             // Call prediction API
             const response = await fetch('/predict', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ inputs: inputData }),
+                body: JSON.stringify({ input_data: inputData }),
             });
             
             if (!response.ok) {
@@ -132,8 +148,8 @@ class PredictionInterface {
             this.resultsContainer.style.display = 'block';
             this.resultsContainer.innerHTML = `
                 <div class="prediction-error">
-                    <i class="fas fa-exclamation-circle"></i>
-                    <p>Error during prediction. Please try again.</p>
+                    <i class="fas fa-exclamation-circle me-2"></i>
+                    <p>${error.message || 'Error during prediction. Please try again.'}</p>
                 </div>
             `;
         } finally {
@@ -146,13 +162,18 @@ class PredictionInterface {
     displayPredictionResult(result) {
         if (!this.resultsContainer) return;
         
-        // Determine if we're showing classification or regression results
-        const isClassification = result.probabilities && Object.keys(result.probabilities).length > 0;
+        // Make sure the results container is visible
+        this.resultsContainer.style.display = 'block';
         
-        if (isClassification) {
+        // Always use classification display regardless of result structure
+        // If probabilities exist, use them; otherwise create a default probability object
+        if (result.probabilities && Object.keys(result.probabilities).length > 0) {
             this.displayClassificationResult(result);
         } else {
-            this.displayRegressionResult(result);
+            // Create a default probability object if none exists
+            result.probabilities = { 'Class 1': 1.0 };
+            result.prediction = result.prediction || 'Class 1';
+            this.displayClassificationResult(result);
         }
         
         // Show results container
@@ -340,4 +361,4 @@ const exampleFeatures = [
         step: 0.01,
         defaultValue: 0
     }
-]; 
+];

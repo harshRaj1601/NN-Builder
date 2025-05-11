@@ -15,6 +15,7 @@ class NeuralNetworkBuilder {
             codeGenerated: false,
             generatedCode: '',
             csvDelimiter: null,
+            isStopping: false,
         };
         
         // UI elements
@@ -47,6 +48,7 @@ class NeuralNetworkBuilder {
             directCodeBtn: document.getElementById('directCodeBtn'),
             startTrainingBtn: document.getElementById('startTrainingBtn'),
             pauseTrainingBtn: document.getElementById('pauseTrainingBtn'),
+            stopTrainingBtn: document.getElementById('stopTrainingBtn'),
             downloadBtn: document.getElementById('downloadBtn'),
             generateCodeBtn: document.getElementById('generateCodeBtn'),
             copyCodeBtn: document.getElementById('copyCodeBtn'),
@@ -122,6 +124,11 @@ class NeuralNetworkBuilder {
         // Pause training
         if (this.elements.pauseTrainingBtn) {
             this.elements.pauseTrainingBtn.addEventListener('click', () => this.pauseTraining());
+        }
+        
+        // Stop training button
+        if (this.elements.stopTrainingBtn) {
+            this.elements.stopTrainingBtn.addEventListener('click', () => this.stopTraining());
         }
         
         // Download model
@@ -704,13 +711,19 @@ class NeuralNetworkBuilder {
                         'Training started. Watch progress in charts below...';
                 }
                 
-                // Show both buttons during training, with start button disabled
+                // Show training control buttons during training, with start button disabled
                 if (this.elements.startTrainingBtn) {
-                    this.elements.startTrainingBtn.style.display = 'block';
+                    this.elements.startTrainingBtn.style.display = 'inline-flex';
                     this.elements.startTrainingBtn.disabled = true;
+                    this.elements.startTrainingBtn.style.opacity = '0.6';
                 }
                 if (this.elements.pauseTrainingBtn) {
-                    this.elements.pauseTrainingBtn.style.display = 'block';
+                    this.elements.pauseTrainingBtn.style.display = 'inline-flex';
+                    this.elements.pauseTrainingBtn.style.marginLeft = '10px';
+                }
+                if (this.elements.stopTrainingBtn) {
+                    this.elements.stopTrainingBtn.style.display = 'inline-flex';
+                    this.elements.stopTrainingBtn.style.marginLeft = '10px';
                 }
                 
                 // Set training state
@@ -733,6 +746,12 @@ class NeuralNetworkBuilder {
         try {
             const trainingStatusText = document.getElementById('training-status-text');
             
+            // Show loading state on pause button
+            if (this.elements.pauseTrainingBtn) {
+                this.elements.pauseTrainingBtn.disabled = true;
+                this.elements.pauseTrainingBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
+            }
+            
             // Send pause/resume request to server
             const response = await axios.post('/pause_training');
             
@@ -741,24 +760,91 @@ class NeuralNetworkBuilder {
                 this.state.isPaused = response.data.paused;
                 
                 if (this.elements.pauseTrainingBtn) {
+                    // Re-enable button
+                    this.elements.pauseTrainingBtn.disabled = false;
+                    
                     // Update button text and icon based on state
                     if (this.state.isPaused) {
                         this.elements.pauseTrainingBtn.innerHTML = '<i class="fas fa-play me-2"></i>Resume Training';
+                        this.elements.pauseTrainingBtn.classList.remove('btn-accent');
+                        this.elements.pauseTrainingBtn.classList.add('btn-primary');
                         if (trainingStatusText) {
                             trainingStatusText.textContent = 'Training paused. Click Resume to continue.';
                         }
                     } else {
                         this.elements.pauseTrainingBtn.innerHTML = '<i class="fas fa-pause me-2"></i>Pause Training';
+                        this.elements.pauseTrainingBtn.classList.remove('btn-primary');
+                        this.elements.pauseTrainingBtn.classList.add('btn-accent');
                         if (trainingStatusText) {
                             trainingStatusText.textContent = 'Training resumed. Watch progress in charts below...';
                         }
                     }
                 }
             } else {
+                if (this.elements.pauseTrainingBtn) {
+                    this.elements.pauseTrainingBtn.disabled = false;
+                    this.elements.pauseTrainingBtn.innerHTML = '<i class="fas fa-pause me-2"></i>Pause Training';
+                }
                 this.showError(response.data.error || 'Failed to pause/resume training.');
             }
         } catch (error) {
+            if (this.elements.pauseTrainingBtn) {
+                this.elements.pauseTrainingBtn.disabled = false;
+                this.elements.pauseTrainingBtn.innerHTML = '<i class="fas fa-pause me-2"></i>Pause Training';
+            }
             this.showError('Error pausing/resuming training: ' + error.message);
+        }
+    }
+    
+    async stopTraining() {
+        try {
+            const trainingStatusText = document.getElementById('training-status-text');
+            
+            // Prevent multiple stop requests
+            if (this.state.isStopping) {
+                return;
+            }
+            
+            this.state.isStopping = true;
+            
+            // Show loading state on stop button
+            if (this.elements.stopTrainingBtn) {
+                this.elements.stopTrainingBtn.disabled = true;
+                this.elements.stopTrainingBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Stopping...';
+            }
+            
+            // Update status text
+            if (trainingStatusText) {
+                trainingStatusText.textContent = 'Stopping training. Please wait...';
+            }
+            
+            // Send stop request to server
+            const response = await axios.post('/stop_training');
+            
+            if (response.data.success) {
+                // Update status text
+                if (trainingStatusText) {
+                    trainingStatusText.textContent = 'Training stopped. Processing results...';
+                }
+                
+                // Wait for the final training status update
+                // The server will send a final update with the complete results
+                // We'll let the checkTrainingStatus method handle the transition to the results section
+            } else {
+                this.state.isStopping = false;
+                if (this.elements.stopTrainingBtn) {
+                    this.elements.stopTrainingBtn.disabled = false;
+                    this.elements.stopTrainingBtn.innerHTML = '<i class="fas fa-stop me-2"></i>Stop Training';
+                }
+                this.showError(response.data.error || 'Failed to stop training.');
+            }
+        } catch (error) {
+            this.state.isStopping = false;
+            if (this.elements.stopTrainingBtn) {
+                this.elements.stopTrainingBtn.disabled = false;
+                this.elements.stopTrainingBtn.innerHTML = '<i class="fas fa-stop me-2"></i>Stop Training';
+            }
+            this.showError('Error stopping training: ' + error.message);
         }
     }
     
@@ -1224,13 +1310,30 @@ class NeuralNetworkBuilder {
                     // Training is complete
                     this.hideLoading();
                     if (trainingStatusText) {
-                        trainingStatusText.textContent = 'Training completed!';
+                        if (this.state.isStopping) {
+                            trainingStatusText.textContent = 'Training stopped successfully!';
+                        } else {
+                            trainingStatusText.textContent = 'Training completed!';
+                        }
                     }
                     
-                    // Reset UI elements
+                    // Reset UI elements and state
+                    this.state.isTraining = false;
+                    this.state.isStopping = false;
+                    
+                    // Hide training control buttons
+                    if (this.elements.pauseTrainingBtn) {
+                        this.elements.pauseTrainingBtn.style.display = 'none';
+                    }
+                    if (this.elements.stopTrainingBtn) {
+                        this.elements.stopTrainingBtn.style.display = 'none';
+                    }
+                    
+                    // Re-enable start button
                     if (this.elements.startTrainingBtn) {
                         this.elements.startTrainingBtn.style.display = 'block';
                         this.elements.startTrainingBtn.disabled = false;
+                        this.elements.startTrainingBtn.style.opacity = '1';
                     }
                     if (this.elements.pauseTrainingBtn) {
                         this.elements.pauseTrainingBtn.style.display = 'none';

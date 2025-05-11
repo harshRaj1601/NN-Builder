@@ -1,3 +1,4 @@
+import AutoPylot
 from flask import Flask, render_template, request, jsonify, send_file, Response
 import pandas as pd
 import numpy as np
@@ -313,17 +314,16 @@ def build_model():
                 elif layer_type == 'BatchNormalization':
                     model.add(tf.keras.layers.BatchNormalization())
 
-        # Get dataset type from model config or use auto-detection as fallback
-        dataset_type = model_config.get('dataset_type')
-        if not dataset_type:
-            # Auto-detect dataset type based on target data
-            if current_target.dtype == 'object' or current_target.dtype.name == 'category' or len(current_target.unique()) < 20:
-                dataset_type = 'classification'
-            else:
-                dataset_type = 'regression'
-            logger.debug(f"Auto-detected dataset type: {dataset_type}")
-        else:
-            logger.debug(f"Using provided dataset type: {dataset_type}")
+        # Get dataset type from model config - prioritize user selection
+        dataset_type = model_config.get('dataset_type', 'classification')
+        logger.debug(f"Using dataset type from model config: {dataset_type}")
+        
+        # Store the dataset type in a global variable for use in training
+        global training_config
+        if training_config is None:
+            training_config = {}
+        training_config['dataset_type'] = dataset_type
+        logger.debug(f"Updated training_config with dataset_type: {dataset_type}")
             
         # Determine appropriate loss function based on dataset type and output layer
         loss = model_config.get('loss')
@@ -414,7 +414,8 @@ def build_model():
 
         return jsonify({
             'success': True,
-            'model_summary': summary_string
+            'model_summary': summary_string,
+            'dataset_type': dataset_type  # Return dataset_type to frontend
         })
 
     except Exception as e:
@@ -442,8 +443,11 @@ def train():
             'batch_size': data.get('batch_size', 32),
             'epochs': data.get('epochs', 20),
             'test_size': data.get('test_size', 0.2),  # Default to 20% test data
-            'infinite_training': data.get('infinite_training', False)  # New option for infinite training
+            'infinite_training': data.get('infinite_training', False),  # New option for infinite training
+            'dataset_type': data.get('dataset_type', 'classification')  # Preserve user-selected dataset type
         }
+        
+        logger.debug(f"Dataset type in training config: {training_config['dataset_type']}")
         
         # Set training flag to true
         training_in_progress = True
@@ -491,7 +495,7 @@ def stop_training():
 @app.route('/train_stream')
 def train_stream():
     def generate():
-        global training_in_progress, stop_training_flag
+        global training_in_progress, stop_training_flag,training_config
         # Reset stop flag at the beginning of training
         stop_training_flag = False
         
@@ -539,10 +543,16 @@ def train_stream():
             # Store original target values for regression problems (for prediction conversion later)
             y_min, y_max = None, None
             
-            # Check if this might be a regression problem
-            is_regression = current_target.dtype != 'object' and current_target.dtype.name != 'category'
+            # Get the dataset type from the model configuration or training config
+            # This ensures we use the user-selected type instead of auto-detecting
+            dataset_type = training_config.get('dataset_type', 'classification')
+            
+            # Check if this is a regression problem based on user selection
+            is_regression = dataset_type == 'regression'
+            logger.debug(f"User-selected dataset type: {dataset_type}, is_regression: {is_regression}")
+            
             if is_regression:
-                logger.debug("Detected regression problem, ensuring target is properly scaled if needed")
+                logger.debug("Processing regression problem, ensuring target is properly scaled if needed")
                 # For regression, normalize the target if it has a large range
                 target_range = np.max(y) - np.min(y)
                 
@@ -556,10 +566,10 @@ def train_stream():
                     y = (y - y_min) / (y_max - y_min)
                     logger.debug(f"Target scaled, new range: [{np.min(y)}, {np.max(y)}]")
             else:
-                logger.debug("Detected classification problem, no target scaling needed")
+                logger.debug("Processing classification problem, no target scaling needed")
 
             # Get training parameters
-            global training_config
+            # global training_config
             if not training_config:
                 training_config = {
                     'optimizer': 'adam',
@@ -587,8 +597,9 @@ def train_stream():
                     # Log all available keys for debugging
                     logger.debug(f"Epoch {epoch} logs: {logs}")
                     
-                    # Check if we have accuracy metrics or regression metrics
-                    is_regression = all(metric not in logs for metric in ['accuracy', 'acc'])
+                    # Get the dataset type from the training config
+                    dataset_type = training_config.get('dataset_type', 'classification')
+                    is_regression = dataset_type == 'regression'
                     
                     if is_regression:
                         # For regression models, we'll use mae as our main metric
@@ -662,9 +673,10 @@ def train_stream():
                     logger.debug(f"Starting model training with metrics: {current_model.metrics_names}")
                     logger.debug(f"Model loss function: {current_model.loss}")
                     
-                    # Check if we're doing classification or regression
-                    is_classification = 'accuracy' in current_model.metrics_names or current_model.loss.endswith('entropy')
-                    logger.debug(f"Task type: {'Classification' if is_classification else 'Regression'}")
+                    # Get the dataset type from the training config
+                    dataset_type = training_config.get('dataset_type', 'classification')
+                    is_classification = dataset_type == 'classification'
+                    logger.debug(f"Task type from config: {'Classification' if is_classification else 'Regression'}")
                     
                     # Check data shapes and types
                     logger.debug(f"Training data shape: X_train={X_train.shape}, y_train={y_train.shape}")
@@ -691,8 +703,9 @@ def train_stream():
                     # Log training completion
                     logger.debug(f"Training completed. History keys: {history.history.keys()}")
                     
-                    # Check if this is a regression or classification task
-                    is_regression = not (current_target.dtype == 'object' or current_target.dtype.name == 'category')
+                    # Get the dataset type from the training config
+                    dataset_type = training_config.get('dataset_type', 'classification')
+                    is_regression = dataset_type == 'regression'
                     logger.debug(f"Task is regression: {is_regression}")
                     
                     # Evaluate model - different handling for regression and classification
@@ -759,8 +772,10 @@ def train_stream():
                         'message': str(e)
                     })
                 finally:
-                    # Reset the training in progress flag
+                    # Reset the training flags
+                    global stop_training_flag
                     training_in_progress = False
+                    stop_training_flag = False
                     # Mark the end of updates
                     update_queue.put(None)
 
@@ -1339,7 +1354,7 @@ if __name__ == "__main__":
 @app.route('/predict', methods=['POST'])
 def make_prediction():
     """Endpoint for making predictions using the trained model"""
-    global current_model, current_data, scaler, label_encoder
+    global current_model, current_data, scaler, label_encoder,training_config
     
     try:
         if current_model is None:
@@ -1380,34 +1395,59 @@ def make_prediction():
             # Make predictions
             predictions = current_model.predict(X_sample)
             
-            # Convert predictions to proper format
-            if len(predictions.shape) > 1 and predictions.shape[1] > 1:
-                # Multi-class classification
-                pred_labels = np.argmax(predictions, axis=1)
-                if hasattr(label_encoder, 'inverse_transform'):
-                    pred_labels = label_encoder.inverse_transform(pred_labels)
-            elif len(predictions.shape) > 1:
-                # Binary classification
-                pred_labels = (predictions > 0.5).astype(int).flatten()
-                if hasattr(label_encoder, 'inverse_transform'):
-                    pred_labels = label_encoder.inverse_transform(pred_labels)
+            # Get the dataset type from training config
+            global training_config
+            dataset_type = training_config.get('dataset_type', 'classification')
+            is_regression = dataset_type == 'regression'
+            logger.debug(f"Making predictions for dataset type: {dataset_type}")
+            
+            # Convert predictions to proper format based on dataset type
+            if not is_regression:
+                if len(predictions.shape) > 1 and predictions.shape[1] > 1:
+                    # Multi-class classification
+                    pred_labels = np.argmax(predictions, axis=1)
+                    if hasattr(label_encoder, 'inverse_transform'):
+                        pred_labels = label_encoder.inverse_transform(pred_labels)
+                    # Create probabilities dictionary for multi-class
+                    probabilities = {}
+                    for i, prob in enumerate(predictions[0]):
+                        class_name = str(label_encoder.inverse_transform([i])[0]) if hasattr(label_encoder, 'inverse_transform') else f'Class {i}'
+                        probabilities[class_name] = float(prob)
+                else:
+                    # Binary classification
+                    pred_labels = (predictions > 0.5).astype(int).flatten()
+                    if hasattr(label_encoder, 'inverse_transform'):
+                        pred_labels = label_encoder.inverse_transform(pred_labels)
+                    # Create probabilities dictionary for binary classification
+                    probabilities = {}
+                    class_names = label_encoder.classes_ if hasattr(label_encoder, 'classes_') else ['Class 0', 'Class 1']
+                    probabilities[str(class_names[0])] = float(1 - predictions[0][0])
+                    probabilities[str(class_names[1])] = float(predictions[0][0])
             else:
                 # Regression
                 pred_labels = predictions
+                # Create a dummy probabilities dictionary for regression to ensure consistent response format
+                probabilities = {'Predicted Value': float(predictions[0][0]) if len(predictions.shape) > 1 else float(predictions[0])}
             
-            # Generate visualization if regression or binary classification
+            # Generate visualization based on dataset type
             visualization_url = None
-            if len(np.unique(y)) > 10:  # Regression
+            if is_regression:
                 visualization_url = generate_regression_visualization(X_sample, y_sample, predictions)
-            elif len(np.unique(y)) == 2:  # Binary classification
-                visualization_url = generate_classification_visualization(X_sample, y_sample, predictions)
+            else:  # Classification
+                if len(np.unique(y)) == 2:  # Binary classification
+                    visualization_url = generate_classification_visualization(X_sample, y_sample, predictions)
+                else:  # Multi-class classification
+                    # No visualization for multi-class yet
+                    pass
             
             # Format response
             result = {
                 'success': True,
+                'prediction': pred_labels[0] if hasattr(pred_labels, '__len__') else pred_labels,
                 'predictions': pred_labels.tolist() if hasattr(pred_labels, 'tolist') else pred_labels,
                 'actual_values': y_sample.tolist() if hasattr(y_sample, 'tolist') else y_sample,
-                'visualization_url': visualization_url
+                'visualization_url': visualization_url,
+                'probabilities': probabilities
             }
             
             return jsonify(result)
@@ -1436,24 +1476,45 @@ def make_prediction():
             # Make predictions
             predictions = current_model.predict(input_scaled)
             
-            # Convert predictions to proper format
-            if len(predictions.shape) > 1 and predictions.shape[1] > 1:
-                # Multi-class classification
-                pred_labels = np.argmax(predictions, axis=1)
-                if hasattr(label_encoder, 'inverse_transform'):
-                    pred_labels = label_encoder.inverse_transform(pred_labels)
-            elif len(predictions.shape) > 1:
-                # Binary classification
-                pred_labels = (predictions > 0.5).astype(int).flatten()
-                if hasattr(label_encoder, 'inverse_transform'):
-                    pred_labels = label_encoder.inverse_transform(pred_labels)
+            # Get the dataset type from training config
+            # global training_config
+            dataset_type = training_config.get('dataset_type', 'classification')
+            is_regression = dataset_type == 'regression'
+            logger.debug(f"Making predictions for dataset type: {dataset_type}")
+            
+            # Convert predictions to proper format based on dataset type
+            if not is_regression:
+                if len(predictions.shape) > 1 and predictions.shape[1] > 1:
+                    # Multi-class classification
+                    pred_labels = np.argmax(predictions, axis=1)
+                    if hasattr(label_encoder, 'inverse_transform'):
+                        pred_labels = label_encoder.inverse_transform(pred_labels)
+                    # Create probabilities dictionary for multi-class
+                    probabilities = {}
+                    for i, prob in enumerate(predictions[0]):
+                        class_name = str(label_encoder.inverse_transform([i])[0]) if hasattr(label_encoder, 'inverse_transform') else f'Class {i}'
+                        probabilities[class_name] = float(prob)
+                else:
+                    # Binary classification
+                    pred_labels = (predictions > 0.5).astype(int).flatten()
+                    if hasattr(label_encoder, 'inverse_transform'):
+                        pred_labels = label_encoder.inverse_transform(pred_labels)
+                    # Create probabilities dictionary for binary classification
+                    probabilities = {}
+                    class_names = label_encoder.classes_ if hasattr(label_encoder, 'classes_') else ['Class 0', 'Class 1']
+                    probabilities[str(class_names[0])] = float(1 - predictions[0][0])
+                    probabilities[str(class_names[1])] = float(predictions[0][0])
             else:
                 # Regression
                 pred_labels = predictions
+                # Create a dummy probabilities dictionary for regression to ensure consistent response format
+                probabilities = {'Predicted Value': float(predictions[0][0]) if len(predictions.shape) > 1 else float(predictions[0])}
             
             return jsonify({
                 'success': True,
-                'predictions': pred_labels.tolist() if hasattr(pred_labels, 'tolist') else pred_labels
+                'prediction': pred_labels[0] if hasattr(pred_labels, '__len__') else pred_labels,
+                'predictions': pred_labels.tolist() if hasattr(pred_labels, 'tolist') else pred_labels,
+                'probabilities': probabilities
             })
     
     except Exception as e:
@@ -1620,3 +1681,4 @@ def get_training_plot():
 
 if __name__ == '__main__':
     app.run(debug=False)  # Keep debug=True for development
+    
